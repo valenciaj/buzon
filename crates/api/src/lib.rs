@@ -1,0 +1,196 @@
+//! API HTTP de Buzón (`/api/v1`), su especificación OpenAPI y el visor público.
+
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
+use axum::extract::Request;
+use axum::http::{header, Method};
+use axum::middleware::{self, Next};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{delete, get, post, put};
+use axum::{Json, Router};
+use buzon_store::app::User;
+use buzon_store::crypto::{self, MasterKey, SecretBox};
+use buzon_store::{AppDb, Id, UserDb};
+use tower_http::services::{ServeDir, ServeFile};
+use utoipa::OpenApi;
+use utoipa_scalar::{Scalar, Servable};
+
+pub mod error;
+pub mod models;
+mod prefs;
+pub mod routes;
+pub mod session;
+mod validate;
+
+use error::{ApiError, ApiResult};
+use routes::{accounts, auth, invitations, me, setup};
+
+pub struct AppState {
+    pub db: AppDb,
+    pub data_dir: PathBuf,
+    pub master: MasterKey,
+    /// Marca la cookie de sesión como `Secure`. Desactívalo solo en desarrollo sin HTTPS.
+    pub cookie_secure: bool,
+    /// URL pública de la configuración; si falta, se usa la guardada por el asistente.
+    pub public_url: Option<String>,
+    user_dbs: Mutex<HashMap<Id, UserDb>>,
+}
+
+impl AppState {
+    pub fn new(
+        db: AppDb,
+        data_dir: PathBuf,
+        master: MasterKey,
+        cookie_secure: bool,
+        public_url: Option<String>,
+    ) -> Self {
+        AppState {
+            db,
+            data_dir,
+            master,
+            cookie_secure,
+            public_url,
+            user_dbs: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Base de datos del usuario (la crea la primera vez).
+    pub async fn user_db(&self, user: Id) -> ApiResult<UserDb> {
+        if let Some(db) = self.user_dbs.lock().expect("mutex").get(&user) {
+            return Ok(db.clone());
+        }
+        let db = UserDb::open(&self.data_dir, user).await?;
+        self.user_dbs.lock().expect("mutex").insert(user, db.clone());
+        Ok(db)
+    }
+
+    /// Clave para cifrar los secretos de un usuario (contraseñas de sus cuentas).
+    pub fn secrets_for(&self, user: Id) -> SecretBox {
+        self.master.derive(&format!("user:{user}"))
+    }
+
+    pub fn totp_box(&self) -> SecretBox {
+        self.master.derive("app:totp")
+    }
+
+    pub fn check_totp(&self, user: &User, code: &str) -> ApiResult<bool> {
+        let Some(sealed) = &user.totp_secret else {
+            return Ok(false);
+        };
+        let secret = self.totp_box().open(sealed)?;
+        Ok(crypto::totp(&secret, &user.username)?
+            .check_current(code)
+            .unwrap_or(false))
+    }
+
+    pub async fn public_url(&self) -> ApiResult<String> {
+        let url = match &self.public_url {
+            Some(u) => Some(u.clone()),
+            None => self.db.setting("public_url").await?,
+        };
+        Ok(url.unwrap_or_default().trim_end_matches('/').to_string())
+    }
+}
+
+#[derive(OpenApi)]
+#[openapi(
+    info(
+        title = "Buzón API",
+        description = "API del webmail Buzón. La web usa esta misma API.\n\n\
+            Autenticación: cookie de sesión `buzon_session` (se obtiene con `/api/v1/auth/login`). \
+            Las peticiones que cambian datos deben enviar `Content-Type: application/json`.\n\n\
+            Los identificadores son UUIDv7 codificados en Base58.",
+        license(name = "MIT")
+    ),
+    paths(
+        health,
+        setup::status, setup::run,
+        auth::login, auth::logout,
+        me::get, me::update_preferences, me::totp_setup, me::totp_enable, me::totp_disable,
+        accounts::list, accounts::create,
+        invitations::create, invitations::list, invitations::revoke, invitations::check, invitations::accept,
+    ),
+    tags(
+        (name = "setup", description = "Asistente de primer arranque"),
+        (name = "auth", description = "Inicio y cierre de sesión"),
+        (name = "me", description = "Usuario actual, preferencias y 2FA"),
+        (name = "accounts", description = "Cuentas de correo del usuario"),
+        (name = "invitations", description = "Registro por invitación (caduca a las 72 h)"),
+    )
+)]
+pub struct ApiDoc;
+
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct Health {
+    pub status: &'static str,
+    pub version: &'static str,
+}
+
+#[utoipa::path(get, path = "/api/v1/health", tag = "setup", responses((status = 200, body = Health)))]
+pub async fn health() -> Json<Health> {
+    Json(Health {
+        status: "ok",
+        version: env!("CARGO_PKG_VERSION"),
+    })
+}
+
+/// Rechaza peticiones que cambian datos sin `Content-Type: application/json`.
+/// Un formulario de otro sitio no puede enviar ese tipo sin una comprobación CORS previa,
+/// así que esto, junto a la cookie `SameSite=Lax`, cierra la puerta al CSRF.
+async fn require_json(req: Request, next: Next) -> Response {
+    let safe = matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS);
+    let json = req
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.starts_with("application/json"));
+    if safe || json {
+        next.run(req).await
+    } else {
+        ApiError::new(
+            axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "json_required",
+            "Envía las peticiones con Content-Type: application/json.",
+        )
+        .into_response()
+    }
+}
+
+pub fn api_router(state: Arc<AppState>) -> Router {
+    let v1 = Router::new()
+        .route("/health", get(health))
+        .route("/setup", get(setup::status).post(setup::run))
+        .route("/auth/login", post(auth::login))
+        .route("/auth/logout", post(auth::logout))
+        .route("/me", get(me::get))
+        .route("/me/preferences", put(me::update_preferences))
+        .route("/me/totp/setup", post(me::totp_setup))
+        .route("/me/totp/enable", post(me::totp_enable))
+        .route("/me/totp/disable", post(me::totp_disable))
+        .route("/accounts", get(accounts::list).post(accounts::create))
+        .route("/invitations", get(invitations::list).post(invitations::create))
+        .route("/invitations/{id}", delete(invitations::revoke))
+        .route("/invite/{token}", get(invitations::check).post(invitations::accept))
+        .fallback(|| async { ApiError::not_found("Esa ruta de la API no existe.") })
+        .layer(middleware::from_fn(require_json))
+        .with_state(state);
+
+    Router::new()
+        .nest("/api/v1", v1)
+        .route("/api/openapi.json", get(|| async { Json(ApiDoc::openapi()) }))
+        .merge(Scalar::with_url("/api/docs", ApiDoc::openapi()))
+}
+
+/// Router completo: API, documentación y, si se indica, el frontend compilado.
+pub fn app(state: Arc<AppState>, web_dir: Option<PathBuf>) -> Router {
+    let router = api_router(state);
+    match web_dir {
+        Some(dir) => {
+            let index = ServeFile::new(dir.join("index.html"));
+            router.fallback_service(ServeDir::new(dir).fallback(index))
+        }
+        None => router,
+    }
+}

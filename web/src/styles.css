@@ -1,0 +1,78 @@
+@import "tailwindcss";
+
+/* Tokens de color: los mismos del prototipo. El tema se elige con data-theme en <html>. */
+:root {
+  --bg: #f4f6f8;
+  --surface: #ffffff;
+  --surface-2: #eceff3;
+  --line: #dbe0e7;
+  --fg: #18202c;
+  --muted: #586374;
+  --accent: #2f4fc4;
+  --on-accent: #ffffff;
+  --good: #1d7a4c;
+  --warn: #8f5b00;
+  --crit: #b42318;
+  --font: "Atkinson Hyperlegible Next", system-ui, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1217; --surface: #161a21; --surface-2: #1d222b; --line: #2a313c;
+    --fg: #e6e9ef; --muted: #9ba5b6; --accent: #8fa6ff; --on-accent: #0f1217;
+    --good: #5cc98f; --warn: #e3b048; --crit: #f08a80; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1217; --surface: #161a21; --surface-2: #1d222b; --line: #2a313c;
+  --fg: #e6e9ef; --muted: #9ba5b6; --accent: #8fa6ff; --on-accent: #0f1217;
+  --good: #5cc98f; --warn: #e3b048; --crit: #f08a80; color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-on-accent: var(--on-accent);
+  --color-good: var(--good);
+  --color-warn: var(--warn);
+  --color-crit: var(--crit);
+  --font-sans: var(--font);
+}
+
+html, body, #root { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+h1, h2, h3 { text-wrap: balance; }
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+
+/* Densidad compacta: menos margen, nunca menos tamaño de texto. */
+:root[data-density="compact"] { --pad: 0.75rem; }
+:root { --pad: 1rem; }
+
+@layer components {
+  .btn {
+    @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-line bg-surface px-4 py-2 font-semibold text-fg hover:border-muted disabled:opacity-60;
+  }
+  .btn-primary { @apply border-accent bg-accent text-on-accent hover:border-accent; }
+  .btn-ghost { @apply border-transparent bg-transparent hover:bg-surface-2; }
+  .input {
+    @apply min-h-10 w-full rounded-lg border border-line bg-bg px-3 py-2 text-fg;
+  }
+  .label { @apply text-sm font-semibold; }
+  .hint { @apply text-sm text-muted; }
+  .card { @apply rounded-xl border border-line bg-surface; }
+  .eyebrow { @apply text-xs font-semibold uppercase tracking-wider text-muted; }
+}

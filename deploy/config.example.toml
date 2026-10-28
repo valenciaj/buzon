@@ -1,0 +1,20 @@
+# Configuración de Buzón: /etc/buzon/config.toml
+
+# Solo local: nginx hace de proxy con HTTPS.
+listen = "127.0.0.1:8080"
+
+# Bases de datos (app.db y users/) y adjuntos.
+data_dir = "/var/lib/buzon"
+
+# Frontend compilado.
+web_dir = "/usr/share/buzon/web"
+
+# Clave maestra (64 caracteres hex). Si no existe, Buzón la crea con permisos 600.
+# Sin ella no se pueden descifrar las contraseñas de las cuentas: haz copia de seguridad.
+master_key_file = "/etc/buzon/master.key"
+
+# URL pública: se usa en los enlaces de invitación.
+public_url = "https://correo.ejemplo.es"
+
+# Cookie de sesión solo por HTTPS. Ponlo a false solo en desarrollo.
+cookie_secure = true

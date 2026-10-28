@@ -1,0 +1,167 @@
+{
+  "common": {
+    "next": "Siguiente",
+    "back": "Atrás",
+    "save": "Guardar",
+    "saved": "Guardado",
+    "cancel": "Cancelar",
+    "skip": "Omitir por ahora",
+    "optional": "opcional",
+    "loading": "Cargando…",
+    "copy": "Copiar",
+    "copied": "Copiado",
+    "error": "Algo ha fallado. Vuelve a intentarlo."
+  },
+  "fields": {
+    "username": "Usuario de Buzón",
+    "usernameHint": "De 3 a 32 caracteres. No tiene nada que ver con tus cuentas de correo.",
+    "password": "Contraseña",
+    "passwordHint": "Al menos 10 caracteres.",
+    "passwordRepeat": "Repite la contraseña",
+    "passwordMismatch": "Las contraseñas no coinciden.",
+    "email": "Correo de contacto",
+    "language": "Idioma"
+  },
+  "languages": { "es": "Español", "en": "English" },
+  "setup": {
+    "title": "Configura Buzón",
+    "steps": {
+      "welcome": "Bienvenida",
+      "admin": "Administrador",
+      "server": "Servidor",
+      "look": "Apariencia",
+      "account": "Correo"
+    },
+    "welcome": {
+      "heading": "Te damos la bienvenida a Buzón",
+      "body": "En unos pasos crearás el usuario administrador, ajustarás el servidor y, si quieres, añadirás tu primera cuenta de correo."
+    },
+    "admin": {
+      "heading": "Crea el administrador",
+      "body": "Con este usuario entrarás en Buzón e invitarás a otras personas. Es distinto del usuario de tu correo."
+    },
+    "server": {
+      "heading": "Ajustes del servidor",
+      "publicUrl": "URL pública",
+      "publicUrlHint": "Se usa en los enlaces de invitación. Por ejemplo, https://correo.ejemplo.es",
+      "timezone": "Zona horaria"
+    },
+    "look": {
+      "heading": "Elige cómo quieres verlo",
+      "body": "Puedes cambiarlo cuando quieras en Ajustes."
+    },
+    "account": {
+      "heading": "Añade tu primera cuenta de correo",
+      "body": "Son los datos de tu servidor de correo. La contraseña se guarda cifrada.",
+      "later": "La conexión con el servidor se comprobará cuando llegue la sincronización."
+    },
+    "finish": "Terminar y entrar"
+  },
+  "look": {
+    "theme": "Tema",
+    "themes": { "system": "Como el sistema", "light": "Claro", "dark": "Oscuro" },
+    "mode": "Modo de trabajo",
+    "modes": { "focus": "Enfoque", "classic": "Clásico" },
+    "modeHint": "Enfoque filtra remitentes nuevos y separa Principal, Novedades y Recibos. Clásico muestra las carpetas de siempre. Cambiar no borra nada.",
+    "view": "Vista de cuentas",
+    "views": { "unified": "Unificada", "per_account": "Por cuenta" },
+    "font": "Fuente",
+    "fontDefault": "por defecto, máxima legibilidad",
+    "fontSize": "Tamaño del texto",
+    "density": "Densidad",
+    "densities": { "comfortable": "Cómoda", "compact": "Compacta" },
+    "densityHint": "Compacta reduce márgenes, nunca el tamaño del texto.",
+    "preview": "Al final somos ocho para el sábado. ¿Te encargas tú del vino? Il1 O0 rn m"
+  },
+  "account": {
+    "name": "Nombre de la cuenta",
+    "namePlaceholder": "Personal",
+    "email": "Dirección de correo",
+    "imapHost": "Servidor IMAP",
+    "imapPort": "Puerto IMAP",
+    "smtpHost": "Servidor SMTP",
+    "smtpPort": "Puerto SMTP",
+    "login": "Usuario del correo",
+    "password": "Contraseña del correo",
+    "add": "Añadir cuenta",
+    "added": "Cuenta añadida."
+  },
+  "login": {
+    "title": "Entra en Buzón",
+    "submit": "Entrar",
+    "totp": "Código de verificación",
+    "totpHint": "Escribe el código de 6 cifras de tu app de autenticación."
+  },
+  "invite": {
+    "title": "Crea tu usuario de Buzón",
+    "body": "Te han invitado a Buzón. Elige tu usuario y contraseña; tus cuentas de correo las añadirás después.",
+    "invalid": "Este enlace de invitación ha caducado o ya se usó. Pide uno nuevo a quien te invitó.",
+    "expires": "El enlace caduca el {{date}}.",
+    "submit": "Crear usuario",
+    "totpOffer": "¿Quieres activar la verificación en dos pasos?",
+    "totpOfferBody": "Además de la contraseña, al entrar te pediremos un código de tu móvil. Protege tu correo aunque alguien averigüe tu contraseña.",
+    "totpYes": "Activar ahora",
+    "totpLater": "Ahora no"
+  },
+  "home": {
+    "empty": "Aún no hay correo aquí",
+    "emptyBody": "La lectura y sincronización del correo llegan en la siguiente fase. Mientras, puedes ajustar Buzón a tu gusto.",
+    "noAccounts": "No tienes cuentas de correo todavía.",
+    "addAccount": "Añadir una cuenta",
+    "accounts": "Cuentas",
+    "all": "Todas",
+    "boxes": {
+      "principal": "Principal",
+      "novedades": "Novedades",
+      "recibos": "Recibos",
+      "later": "Responder luego",
+      "aside": "Apartados",
+      "screener": "Por aprobar",
+      "sent": "Enviados",
+      "inbox": "Entrada",
+      "drafts": "Borradores",
+      "archive": "Archivo",
+      "spam": "Spam"
+    },
+    "settings": "Ajustes",
+    "logout": "Cerrar sesión",
+    "menu": "Menú"
+  },
+  "settings": {
+    "title": "Ajustes",
+    "tabs": {
+      "look": "Apariencia",
+      "security": "Seguridad",
+      "accounts": "Cuentas de correo",
+      "invitations": "Invitaciones"
+    },
+    "back": "Volver al correo"
+  },
+  "totp": {
+    "title": "Verificación en dos pasos",
+    "on": "Activada. Al entrar se te pedirá un código de tu app de autenticación.",
+    "off": "Desactivada. Actívala para proteger tu cuenta aunque alguien sepa tu contraseña.",
+    "start": "Activar",
+    "scan": "Escanea este código con tu app de autenticación (por ejemplo, Aegis, 2FAS o Google Authenticator).",
+    "manual": "Si no puedes escanearlo, escribe esta clave:",
+    "code": "Código de 6 cifras",
+    "confirm": "Confirmar y activar",
+    "enabled": "Verificación en dos pasos activada.",
+    "disable": "Desactivar",
+    "disablePrompt": "Escribe tu contraseña para desactivarla.",
+    "disabled": "Verificación en dos pasos desactivada."
+  },
+  "invitations": {
+    "title": "Invitar a alguien",
+    "body": "Crea un enlace y envíaselo. Caduca a las 72 horas y sirve una sola vez.",
+    "note": "Nota",
+    "notePlaceholder": "Para quién es (solo la ves tú)",
+    "create": "Crear enlace",
+    "created": "Enlace creado. Cópialo ahora: no se volverá a mostrar.",
+    "list": "Enlaces creados",
+    "none": "Todavía no has invitado a nadie.",
+    "status": { "pending": "Pendiente", "used": "Usada", "expired": "Caducada" },
+    "expires": "Caduca el {{date}}",
+    "revoke": "Anular"
+  }
+}

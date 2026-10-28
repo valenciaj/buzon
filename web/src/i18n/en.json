@@ -1,0 +1,167 @@
+{
+  "common": {
+    "next": "Next",
+    "back": "Back",
+    "save": "Save",
+    "saved": "Saved",
+    "cancel": "Cancel",
+    "skip": "Skip for now",
+    "optional": "optional",
+    "loading": "Loading…",
+    "copy": "Copy",
+    "copied": "Copied",
+    "error": "Something went wrong. Please try again."
+  },
+  "fields": {
+    "username": "Buzón username",
+    "usernameHint": "3 to 32 characters. It has nothing to do with your email accounts.",
+    "password": "Password",
+    "passwordHint": "At least 10 characters.",
+    "passwordRepeat": "Repeat the password",
+    "passwordMismatch": "The passwords don't match.",
+    "email": "Contact email",
+    "language": "Language"
+  },
+  "languages": { "es": "Español", "en": "English" },
+  "setup": {
+    "title": "Set up Buzón",
+    "steps": {
+      "welcome": "Welcome",
+      "admin": "Administrator",
+      "server": "Server",
+      "look": "Appearance",
+      "account": "Email"
+    },
+    "welcome": {
+      "heading": "Welcome to Buzón",
+      "body": "In a few steps you'll create the administrator, adjust the server and, if you like, add your first email account."
+    },
+    "admin": {
+      "heading": "Create the administrator",
+      "body": "You'll use this user to sign in to Buzón and invite other people. It is separate from your email login."
+    },
+    "server": {
+      "heading": "Server settings",
+      "publicUrl": "Public URL",
+      "publicUrlHint": "Used in invitation links. For example, https://mail.example.com",
+      "timezone": "Time zone"
+    },
+    "look": {
+      "heading": "Choose how it looks",
+      "body": "You can change this any time in Settings."
+    },
+    "account": {
+      "heading": "Add your first email account",
+      "body": "These are your mail server details. The password is stored encrypted.",
+      "later": "The server connection will be checked once syncing arrives."
+    },
+    "finish": "Finish and sign in"
+  },
+  "look": {
+    "theme": "Theme",
+    "themes": { "system": "Match system", "light": "Light", "dark": "Dark" },
+    "mode": "Work mode",
+    "modes": { "focus": "Focus", "classic": "Classic" },
+    "modeHint": "Focus screens new senders and splits Main, News and Receipts. Classic shows the usual folders. Switching deletes nothing.",
+    "view": "Account view",
+    "views": { "unified": "Unified", "per_account": "One account at a time" },
+    "font": "Font",
+    "fontDefault": "default, most legible",
+    "fontSize": "Text size",
+    "density": "Density",
+    "densities": { "comfortable": "Comfortable", "compact": "Compact" },
+    "densityHint": "Compact trims spacing, never the text size.",
+    "preview": "There are eight of us on Saturday. Can you bring the wine? Il1 O0 rn m"
+  },
+  "account": {
+    "name": "Account name",
+    "namePlaceholder": "Personal",
+    "email": "Email address",
+    "imapHost": "IMAP server",
+    "imapPort": "IMAP port",
+    "smtpHost": "SMTP server",
+    "smtpPort": "SMTP port",
+    "login": "Email username",
+    "password": "Email password",
+    "add": "Add account",
+    "added": "Account added."
+  },
+  "login": {
+    "title": "Sign in to Buzón",
+    "submit": "Sign in",
+    "totp": "Verification code",
+    "totpHint": "Enter the 6-digit code from your authenticator app."
+  },
+  "invite": {
+    "title": "Create your Buzón user",
+    "body": "You've been invited to Buzón. Choose a username and password; you'll add your email accounts afterwards.",
+    "invalid": "This invitation link has expired or was already used. Ask whoever invited you for a new one.",
+    "expires": "The link expires on {{date}}.",
+    "submit": "Create user",
+    "totpOffer": "Turn on two-step verification?",
+    "totpOfferBody": "Besides your password, we'll ask for a code from your phone when you sign in. It protects your email even if someone learns your password.",
+    "totpYes": "Turn on now",
+    "totpLater": "Not now"
+  },
+  "home": {
+    "empty": "No mail here yet",
+    "emptyBody": "Reading and syncing mail arrive in the next phase. Meanwhile, you can make Buzón your own.",
+    "noAccounts": "You don't have any email accounts yet.",
+    "addAccount": "Add an account",
+    "accounts": "Accounts",
+    "all": "All",
+    "boxes": {
+      "principal": "Main",
+      "novedades": "News",
+      "recibos": "Receipts",
+      "later": "Reply later",
+      "aside": "Set aside",
+      "screener": "To screen",
+      "sent": "Sent",
+      "inbox": "Inbox",
+      "drafts": "Drafts",
+      "archive": "Archive",
+      "spam": "Spam"
+    },
+    "settings": "Settings",
+    "logout": "Sign out",
+    "menu": "Menu"
+  },
+  "settings": {
+    "title": "Settings",
+    "tabs": {
+      "look": "Appearance",
+      "security": "Security",
+      "accounts": "Email accounts",
+      "invitations": "Invitations"
+    },
+    "back": "Back to mail"
+  },
+  "totp": {
+    "title": "Two-step verification",
+    "on": "On. You'll be asked for a code from your authenticator app when you sign in.",
+    "off": "Off. Turn it on to protect your account even if someone knows your password.",
+    "start": "Turn on",
+    "scan": "Scan this code with your authenticator app (for example Aegis, 2FAS or Google Authenticator).",
+    "manual": "If you can't scan it, type this key:",
+    "code": "6-digit code",
+    "confirm": "Confirm and turn on",
+    "enabled": "Two-step verification is on.",
+    "disable": "Turn off",
+    "disablePrompt": "Enter your password to turn it off.",
+    "disabled": "Two-step verification is off."
+  },
+  "invitations": {
+    "title": "Invite someone",
+    "body": "Create a link and send it to them. It expires after 72 hours and works only once.",
+    "note": "Note",
+    "notePlaceholder": "Who it's for (only you see this)",
+    "create": "Create link",
+    "created": "Link created. Copy it now: it won't be shown again.",
+    "list": "Links created",
+    "none": "You haven't invited anyone yet.",
+    "status": { "pending": "Pending", "used": "Used", "expired": "Expired" },
+    "expires": "Expires {{date}}",
+    "revoke": "Revoke"
+  }
+}

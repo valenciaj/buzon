@@ -1,0 +1,23 @@
+[package]
+name = "buzon-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+argon2.workspace = true
+bs58.workspace = true
+chacha20poly1305.workspace = true
+hex.workspace = true
+hkdf.workspace = true
+rand.workspace = true
+serde.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+totp-rs.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio.workspace = true
