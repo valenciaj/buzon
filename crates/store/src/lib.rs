@@ -4,6 +4,7 @@
 pub mod app;
 pub mod compose;
 pub mod crypto;
+pub mod flow;
 pub mod id;
 pub mod mail;
 pub mod organize;

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQueryClient, type InfiniteData } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import { api, ApiError, type From, type Thread, type ThreadPage } from '../../lib/api'
+import { api, ApiError, type FlowChange, type From, type Thread, type ThreadPage } from '../../lib/api'
 import type { MailAction } from '../../lib/mail'
 import { useToast } from '../Toaster'
 
@@ -15,7 +15,7 @@ export type MoveTarget = MailAction | { mailbox: string; name: string }
  * pero esperan unos segundos por si se deshace; al cerrar la pestaña se envían ya.
  */
 export function useMailActions(from: From) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const qc = useQueryClient()
   const toast = useToast()
   const pending = useRef(new Map<number, () => void>())
@@ -40,6 +40,7 @@ export function useMailActions(from: From) {
     qc.invalidateQueries({ queryKey: ['mailboxes'] })
     qc.invalidateQueries({ queryKey: ['thread'] })
     qc.invalidateQueries({ queryKey: ['labels'] })
+    qc.invalidateQueries({ queryKey: ['flow'] })
   }
 
   function editPages(edit: (p: ThreadPage) => ThreadPage) {
@@ -135,5 +136,48 @@ export function useMailActions(from: From) {
     api.labelThreads(ids, add, remove).then(refresh, fail)
   }
 
-  return { move, flags, label, hidden }
+  /**
+   * Pilas y pospuestos. Con `leaves`, los hilos salen de la lista que se ve
+   * (por ejemplo, al apartar algo de Principal). Se puede deshacer.
+   */
+  function flow(ids: string[], change: FlowChange, opts: { leaves?: boolean; onUndo?: () => void } = {}) {
+    if (!ids.length) return
+    if (opts.leaves) hide(ids)
+    const patch = (x: { reply_later: boolean; aside: boolean; snooze_until: number | null }) => ({
+      reply_later: change.reply_later ?? x.reply_later,
+      aside: change.aside ?? x.aside,
+      snooze_until: change.snooze_until === undefined ? x.snooze_until : change.snooze_until || null,
+    })
+    editPages((p) => ({ ...p, threads: p.threads.map((x) => (ids.includes(x.id) ? { ...x, ...patch(x) } : x)) }))
+    for (const id of ids) qc.setQueryData<Thread>(['thread', id], (old) => old && { ...old, ...patch(old) })
+    const undo: FlowChange = {}
+    let kind = ''
+    if (change.reply_later !== undefined) {
+      undo.reply_later = !change.reply_later
+      kind = change.reply_later ? 'replyLater' : 'unReplyLater'
+    }
+    if (change.aside !== undefined) {
+      undo.aside = !change.aside
+      kind = change.aside ? 'aside' : 'unAside'
+    }
+    if (change.snooze_until !== undefined) {
+      undo.snooze_until = 0
+      kind = change.snooze_until ? 'snooze' : 'unsnooze'
+    }
+    const date = change.snooze_until
+      ? new Date(change.snooze_until * 1000).toLocaleString(i18n.language, { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
+      : ''
+    api.setFlow(ids, change).then(refresh, fail)
+    toast({
+      text: t(`flow.toast.${kind}`, { count: ids.length, date }),
+      ms: UNDO_MS,
+      // Deshacer un pospuesto lo quita; deshacer quitarlo no sabe la fecha que tenía.
+      undo: change.snooze_until === 0 ? undefined : () => {
+        api.setFlow(ids, undo).then(refresh, fail)
+        opts.onUndo?.()
+      },
+    })
+  }
+
+  return { move, flags, label, flow, hidden }
 }

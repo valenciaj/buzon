@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Mailbox } from './api'
-import { actionsFor, boxKey, customFolders, dayGroup, emailDocument, fileSize, initials, linkify, parseBox, shortDate, unreadByRole } from './mail'
+import { actionsFor, boxKey, customFolders, snoozeOptions, dayGroup, emailDocument, fileSize, initials, linkify, parseBox, shortDate, unreadByRole } from './mail'
 
 const mb = (p: Partial<Mailbox>): Mailbox => ({
   id: 'x', account_id: 'a', name: 'INBOX', delimiter: '/', role: null, total: 0, unread: 0, ...p,
@@ -15,6 +15,23 @@ describe('carpetas', () => {
     expect(boxKey({ mailbox: 'abc' })).toBe('m:abc')
     expect(parseBox('l:xyz')).toEqual({ label: 'xyz' })
     expect(boxKey({ label: 'xyz' })).toBe('l:xyz')
+    expect(parseBox('v:screener')).toEqual({ view: 'screener' })
+    expect(boxKey({ view: 'reply_later' })).toBe('v:reply_later')
+    expect(parseBox('v:nada')).toEqual({ role: 'inbox' })
+  })
+  it('propone cuándo posponer', () => {
+    const keys = (d: Date) => snoozeOptions(d).map((o) => o.key)
+    // Martes por la mañana: esta tarde, mañana, el sábado y el lunes.
+    const tue = new Date(2026, 9, 27, 10, 0)
+    expect(keys(tue)).toEqual(['tonight', 'tomorrow', 'weekend', 'nextWeek'])
+    const o = snoozeOptions(tue)
+    expect(o[0].at).toEqual(new Date(2026, 9, 27, 18, 0))
+    expect(o[2].at).toEqual(new Date(2026, 9, 31, 9, 0))
+    expect(o[3].at).toEqual(new Date(2026, 10, 2, 8, 0))
+    // Viernes por la noche: sin «esta tarde» ni «fin de semana».
+    expect(keys(new Date(2026, 9, 30, 21, 0))).toEqual(['tomorrow', 'nextWeek'])
+    // Domingo: el lunes es mañana y también «la semana que viene».
+    expect(snoozeOptions(new Date(2026, 10, 1, 20, 0)).at(-1)!.at).toEqual(new Date(2026, 10, 2, 8, 0))
   })
   it('ofrece las acciones que tienen sentido en cada carpeta', () => {
     expect(actionsFor('inbox')).toEqual(['archive', 'trash', 'junk'])

@@ -8,8 +8,9 @@ import { Alert } from '../ui'
 import { Icon } from './Icons'
 
 /** Los hilos de un filtro, página a página. La lista y los atajos de teclado comparten la consulta. */
-export function useThreadPages(filter: ThreadFilter) {
+export function useThreadPages(filter: ThreadFilter, enabled = true) {
   return useInfiniteQuery({
+    enabled,
     queryKey: ['threads', filter],
     queryFn: ({ pageParam }) => api.threads(filter, pageParam),
     initialPageParam: undefined as string | undefined,
@@ -19,7 +20,7 @@ export function useThreadPages(filter: ThreadFilter) {
 
 export function ThreadList({
   title, filter, accounts, selected, grouped, showAccount, onSelect, onMenu, onCompose, before,
-  hidden, checked, onCheck, toolbar, search, onSearch,
+  hidden, checked, onCheck, toolbar, search, onSearch, pinned, actions, emptyText,
 }: {
   title: string
   filter: ThreadFilter
@@ -43,10 +44,18 @@ export function ThreadList({
   toolbar: React.ReactNode
   search: string
   onSearch: (q: string) => void
+  /** Hilos fijos arriba, con su título (los que reaparecen, en Principal). */
+  pinned?: { title: string; filter: ThreadFilter }
+  /** Botones junto al título. */
+  actions?: React.ReactNode
+  /** Qué decir cuando no hay nada (en vez del texto de carpeta vacía). */
+  emptyText?: React.ReactNode
 }) {
   const { t, i18n } = useTranslation()
   const q = useThreadPages(filter)
   const labels = useQuery({ queryKey: ['labels'], queryFn: api.labels })
+  const top = useThreadPages(pinned?.filter ?? {}, !!pinned)
+  const tops = pinned ? (top.data?.pages[0]?.threads ?? []).filter((x) => !hidden.has(x.id)) : []
   const threads = (q.data?.pages.flatMap((p) => p.threads) ?? []).filter((x) => !hidden.has(x.id))
   const byId = new Map((labels.data ?? []).map((l) => [l.id, l]))
   const sentinel = useRef<HTMLDivElement>(null)
@@ -72,6 +81,8 @@ export function ThreadList({
         <Link to="/settings/accounts" className="btn btn-primary mt-3">{t('home.addAccount')}</Link>
       </>
     )
+  } else if (emptyText) {
+    empty = emptyText
   } else if (search) {
     empty = <><b className="block text-fg">{t('search.empty')}</b>{t('search.emptyBody')}</>
   } else if (syncing) {
@@ -100,6 +111,7 @@ export function ThreadList({
               <Icon name="menu" />
             </button>
             <h1 className="min-w-0 flex-1 truncate text-xl font-bold">{title}</h1>
+            {actions}
             {onCompose && (
               <button className="btn btn-primary px-3 lg:hidden" onClick={onCompose} aria-label={t('compose.new')}>
                 <Icon name="compose" /> <span className="max-sm:sr-only">{t('compose.newShort')}</span>
@@ -113,7 +125,18 @@ export function ThreadList({
         {q.isError && <div className="p-4"><Alert>{t('common.error')}</Alert></div>}
         {q.isLoading && <p className="p-6 text-muted">{t('common.loading')}</p>}
         {before}
-        {q.isSuccess && threads.length === 0 && !before && <div className="px-6 py-12 text-center text-muted">{empty}</div>}
+        {tops.length > 0 && (
+          <div className="border-b-4 border-line">
+            <p className="eyebrow px-[var(--pad)] pb-1 pt-4">{pinned?.title}</p>
+            {tops.map((th) => (
+              <ThreadItem key={th.id} thread={th} lang={i18n.language} selected={selected === th.id} checked={checked.has(th.id)}
+                labels={th.labels.flatMap((id) => byId.get(id) ?? [])}
+                dot={showAccount ? color(th.account_id) : undefined} onClick={() => onSelect(th.id)}
+                onCheck={(on) => onCheck([th.id], on)} />
+            ))}
+          </div>
+        )}
+        {q.isSuccess && threads.length === 0 && tops.length === 0 && !before && <div className="px-6 py-12 text-center text-muted">{empty}</div>}
         {threads.map((th, i) => {
           const group = grouped ? dayGroup(th.last_date) : null
           const newGroup = grouped && (i === 0 || dayGroup(threads[i - 1].last_date) !== group)
@@ -232,6 +255,8 @@ function ThreadItem({ thread: th, lang, selected, checked, labels, dot, onClick,
       <span className="flex flex-col items-end gap-1 text-sm text-muted tabular-nums">
         <span className="whitespace-nowrap">{shortDate(th.last_date, lang)}</span>
         <span className="flex gap-1">
+          {th.has_note && <Icon name="note" className="size-4" />}
+          {th.snooze_until !== null && th.snooze_until * 1000 > Date.now() && <Icon name="clock" className="size-4" />}
           {th.has_attachments && <Icon name="clip" className="size-4" />}
           {th.flagged && <Icon name="star" filled className="size-4 text-warn" />}
         </span>

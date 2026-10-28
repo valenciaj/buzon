@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError, type Mailbox } from '../../lib/api'
-import { customFolders, LABEL_COLORS, ROLE_ORDER } from '../../lib/mail'
+import { customFolders, LABEL_COLORS, ROLE_ORDER, snoozeOptions } from '../../lib/mail'
 import { Icon } from './Icons'
 
 /** Botón con un menú desplegable. Se cierra al pulsar fuera o con Escape. */
@@ -119,6 +119,52 @@ export function MoveMenu({ mailboxes, account, onMove, compact }: {
           <span className="min-w-0 truncate">{m.role ? t(`mail.roles.${m.role}`) : m.name}</span>
         </button>
       ))}
+    </Popover>
+  )
+}
+
+/** Posponer: el hilo desaparece y vuelve arriba en la fecha elegida. */
+export function SnoozeMenu({ snoozed, onSnooze, compact }: {
+  /** Ya está pospuesto: se ofrece quitarlo. */
+  snoozed?: boolean
+  /** Segundos Unix; 0 quita lo pospuesto. */
+  onSnooze: (until: number) => void
+  compact?: boolean
+}) {
+  const { t, i18n } = useTranslation()
+  const [pick, setPick] = useState('')
+  const fmt = (d: Date) => d.toLocaleString(i18n.language, { weekday: 'short', hour: '2-digit', minute: '2-digit' })
+  return (
+    <Popover label={t('flow.snooze')} icon="clock" compact={compact}>
+      {(close) => (
+        <>
+          {snoozeOptions().map((o) => (
+            <button key={o.key} role="menuitem" className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-surface-2"
+              onClick={() => { close(); onSnooze(Math.floor(o.at.getTime() / 1000)) }}>
+              <span>{t(`flow.snoozeOptions.${o.key}`)}</span>
+              <span className="text-sm text-muted">{fmt(o.at)}</span>
+            </button>
+          ))}
+          <form className="flex gap-1 border-t border-line p-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              const at = new Date(pick).getTime()
+              if (!Number.isFinite(at) || at <= Date.now()) return
+              close()
+              onSnooze(Math.floor(at / 1000))
+            }}>
+            <input type="datetime-local" className="input min-h-9 py-1 text-sm" aria-label={t('flow.snoozeOptions.pick')}
+              value={pick} onChange={(e) => setPick(e.target.value)} />
+            <button className="btn min-h-9 px-2.5 py-1 text-sm" disabled={!pick}>OK</button>
+          </form>
+          {snoozed && (
+            <button role="menuitem" className="w-full border-t border-line px-3 py-2 text-left hover:bg-surface-2"
+              onClick={() => { close(); onSnooze(0) }}>
+              {t('flow.unsnooze')}
+            </button>
+          )}
+        </>
+      )}
     </Popover>
   )
 }

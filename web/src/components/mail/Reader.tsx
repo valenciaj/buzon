@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import { api, type Addr, type Mailbox, type Message, type Thread } from '../../lib/api'
+import { api, type Addr, type Bucket, type FlowChange, type Mailbox, type Message, type Thread } from '../../lib/api'
 import { emailDocument, fileSize, initials, linkify, longDate, shortDate, type MailAction } from '../../lib/mail'
 import {
   addrText, emptyCompose, forwardHtml, pickIdentity, prefixSubject, quoteHtml, replyRecipients, signatureHtml,
@@ -10,7 +10,8 @@ import { useCompose } from '../compose/ComposerProvider'
 import { FONTS } from '../../lib/look'
 import { Alert } from '../ui'
 import { Icon } from './Icons'
-import { LabelMenu, MoveMenu } from './Menus'
+import { LabelMenu, MoveMenu, SnoozeMenu } from './Menus'
+import { useScreen } from './Screener'
 import { LabelChip } from './ThreadList'
 import type { MoveTarget } from './useMailActions'
 
@@ -20,7 +21,24 @@ const ACTION_ICONS: Record<MailAction, string> = { archive: 'archive', inbox: 'i
 export const REPLY_EVENT = 'buzon:reply'
 export type ReplyKind = 'reply' | 'all' | 'forward'
 
-export function Reader({ id, font, onBack, actions, mailboxes, onMove, onLabel }: {
+export function Reader(props: ReaderProps) {
+  // Cada hilo empieza con su nota abierta solo si tiene.
+  return <ReaderView key={props.id ?? ''} {...props} />
+}
+
+interface ReaderProps {
+  id: string | null
+  font: string
+  onBack: () => void
+  actions: MailAction[]
+  mailboxes: Mailbox[]
+  onMove: (target: MoveTarget) => void
+  onLabel: (add: string[], remove: string[]) => void
+  onFlow: (change: FlowChange) => void
+  focus: boolean
+}
+
+function ReaderView({ id, font, onBack, actions, mailboxes, onMove, onLabel, onFlow, focus }: {
   id: string | null
   font: string
   onBack: () => void
@@ -29,11 +47,16 @@ export function Reader({ id, font, onBack, actions, mailboxes, onMove, onLabel }
   mailboxes: Mailbox[]
   onMove: (target: MoveTarget) => void
   onLabel: (add: string[], remove: string[]) => void
+  onFlow: (change: FlowChange) => void
+  /** Modo Enfoque: filtro de remitentes y bandejas. */
+  focus: boolean
 }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const qc = useQueryClient()
   const q = useQuery({ queryKey: ['thread', id], queryFn: () => api.thread(id!), enabled: !!id })
   const labels = useQuery({ queryKey: ['labels'], queryFn: api.labels })
+  const [noteState, setNoteOpen] = useState<boolean | null>(null)
+  const noteOpen = noteState ?? !!q.data?.note
   const update = useMutation({
     mutationFn: (change: { seen?: boolean; flagged?: boolean }) => api.updateThread(id!, change),
     onMutate: (change) => {
@@ -74,6 +97,8 @@ export function Reader({ id, font, onBack, actions, mailboxes, onMove, onLabel }
 
   const th = q.data
   const flagged = th.messages.some((m) => m.flagged)
+  const snoozed = th.snooze_until !== null && th.snooze_until * 1000 > Date.now()
+  const bubbled = th.snooze_until !== null && !snoozed
   return (
     <div className="mx-auto flex w-full max-w-[48rem] flex-col gap-4 px-[var(--pad)] pb-12 sm:px-6">
       <div className="sticky top-0 z-[1] -mx-[var(--pad)] flex flex-wrap gap-0.5 border-b border-line bg-bg px-[var(--pad)] py-2.5 sm:-mx-6 sm:gap-1 sm:px-6">
@@ -88,6 +113,21 @@ export function Reader({ id, font, onBack, actions, mailboxes, onMove, onLabel }
         <LabelMenu current={th.labels} onChange={onLabel} compact />
         <MoveMenu mailboxes={mailboxes} account={th.account_id} compact
           onMove={(m) => onMove({ mailbox: m.id, name: m.role ? t(`mail.roles.${m.role}`) : m.name })} />
+        <button className="btn btn-ghost px-2.5" aria-pressed={th.reply_later} title={th.reply_later ? t('flow.unReplyLater') : t('flow.replyLater')}
+          onClick={() => onFlow({ reply_later: !th.reply_later })}>
+          <Icon name="later" className={th.reply_later ? 'text-accent' : ''} />
+          <span className="sr-only">{th.reply_later ? t('flow.unReplyLater') : t('flow.replyLater')}</span>
+        </button>
+        <button className="btn btn-ghost px-2.5" aria-pressed={th.aside} title={th.aside ? t('flow.unAside') : t('flow.aside')}
+          onClick={() => onFlow({ aside: !th.aside })}>
+          <Icon name="pin" className={th.aside ? 'text-accent' : ''} />
+          <span className="sr-only">{th.aside ? t('flow.unAside') : t('flow.aside')}</span>
+        </button>
+        <SnoozeMenu snoozed={th.snooze_until !== null} onSnooze={(until) => onFlow({ snooze_until: until })} compact />
+        <button className="btn btn-ghost px-2.5" aria-pressed={noteOpen} title={t('flow.note')} onClick={() => setNoteOpen(!noteOpen)}>
+          <Icon name="note" className={th.note ? 'text-accent' : ''} />
+          <span className="sr-only">{t('flow.note')}</span>
+        </button>
         <button className="btn btn-ghost px-2.5" title={t('mail.markUnread')} onClick={() => { update.mutate({ seen: false }); onBack() }}>
           <Icon name="unread" /> <span className="sr-only">{t('mail.markUnread')}</span>
         </button>
@@ -107,6 +147,21 @@ export function Reader({ id, font, onBack, actions, mailboxes, onMove, onLabel }
           </div>
         )}
       </div>
+      {focus && th.sender && <SenderBanner thread={th} />}
+      {(snoozed || bubbled) && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-line bg-surface px-3 py-2 text-sm">
+          <Icon name="clock" className="shrink-0 text-muted" />
+          <span className="min-w-0 flex-1">
+            {snoozed
+              ? t('flow.snoozedUntil', { date: longDate(th.snooze_until!, i18n.language) })
+              : t('flow.bubbled')}
+          </span>
+          <button className="btn min-h-8 px-3 py-1 text-sm" onClick={() => onFlow({ snooze_until: 0 })}>
+            {snoozed ? t('flow.unsnooze') : t('flow.done')}
+          </button>
+        </div>
+      )}
+      {noteOpen && <NoteBox key={th.id} thread={th} />}
       <ReplyKeys message={th.messages[th.messages.length - 1]} thread={th} />
       <ol className="flex flex-col gap-3">
         {th.messages.map((m, i) => (
@@ -163,6 +218,68 @@ function useReply(m: Message, th: Thread) {
   }
 }
 
+const BUCKETS: Bucket[] = ['principal', 'news', 'receipts']
+
+/** Quién escribe y qué se ha decidido: aprobar o rechazar, o cambiarlo de bandeja. */
+function SenderBanner({ thread }: { thread: Thread }) {
+  const { t } = useTranslation()
+  const screen = useScreen()
+  const s = thread.sender!
+  const name = s.name || s.email
+  if (s.status === 'pending' || s.status === 'blocked') {
+    return (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-[color-mix(in_srgb,var(--accent)_40%,var(--line))] bg-[color-mix(in_srgb,var(--accent)_8%,var(--surface))] px-3 py-2.5">
+        <Icon name="screener" className="shrink-0 text-accent" />
+        <span className="min-w-0 flex-1">
+          {s.status === 'pending' ? <><b>{t('flow.ask', { name })}</b> <span className="text-sm text-muted">{t('flow.askBody')}</span></> : t('flow.blockedInfo', { name })}
+        </span>
+        <span className="flex gap-1.5">
+          <button className="btn btn-primary min-h-9 px-3 py-1" onClick={() => screen(s, true)}>
+            {s.status === 'pending' ? t('flow.yes') : t('flow.approve')}
+          </button>
+          {s.status === 'pending' && <button className="btn min-h-9 px-3 py-1" onClick={() => screen(s, false)}>{t('flow.no')}</button>}
+        </span>
+      </div>
+    )
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-sm text-muted">
+      <span>{t('flow.goesTo')}</span>
+      <div className="flex rounded-lg border border-line p-0.5" role="radiogroup" aria-label={t('flow.goesTo')}>
+        {BUCKETS.map((b) => (
+          <button key={b} role="radio" aria-checked={s.bucket === b} onClick={() => s.bucket !== b && screen(s, true, b)}
+            className={`rounded-md px-2 py-0.5 ${s.bucket === b ? 'bg-surface-2 font-semibold text-fg' : ''}`}>
+            {t(`flow.buckets.${b}`)}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** Nota privada del hilo; se guarda al salir del campo. */
+function NoteBox({ thread }: { thread: Thread }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [text, setText] = useState(thread.note)
+  const saved = useRef(thread.note)
+  async function save() {
+    if (text.trim() === saved.current) return
+    saved.current = text.trim()
+    await api.setNote(thread.id, text).catch(() => undefined)
+    qc.invalidateQueries({ queryKey: ['thread', thread.id] })
+    qc.invalidateQueries({ queryKey: ['threads'] })
+  }
+  return (
+    <label className="flex flex-col gap-1.5 rounded-lg border border-[color-mix(in_srgb,var(--warn)_45%,var(--line))] bg-[color-mix(in_srgb,var(--warn)_8%,var(--surface))] p-3">
+      <span className="flex items-center gap-1.5 text-sm font-semibold"><Icon name="note" className="size-4" /> {t('flow.noteLabel')}</span>
+      <textarea className="min-h-20 w-full resize-y bg-transparent outline-none" value={text} autoFocus={!thread.note}
+        placeholder={t('flow.notePlaceholder')} maxLength={10000}
+        onChange={(e) => setText(e.target.value)} onBlur={save} />
+    </label>
+  )
+}
+
 function ReplyKeys({ message, thread }: { message?: Message; thread: Thread }) {
   if (!message) return null
   return <ReplyListener message={message} thread={thread} />
@@ -212,6 +329,12 @@ function MessageView({ message: m, thread, font, initiallyOpen }: { message: Mes
       {open && (
         <div className="flex flex-col gap-3 border-t border-line">
           {m.cc.length > 0 && <p className="px-4 pt-3 text-sm text-muted">{t('mail.cc')} {people(m.cc)}</p>}
+          {m.trackers.length > 0 && (
+            <p className="mx-4 mt-3 flex items-start gap-2 text-sm text-muted">
+              <Icon name="shield" className="mt-0.5 size-4 shrink-0 text-good" />
+              <span>{t('flow.trackers', { count: m.trackers.length, list: m.trackers.join(', ') })}</span>
+            </p>
+          )}
           {m.html && m.remote_images > 0 && !images && (
             <div className="mx-4 mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-[color-mix(in_srgb,var(--good)_40%,var(--line))] bg-[color-mix(in_srgb,var(--good)_8%,var(--surface))] px-3 py-2 text-sm">
               <Icon name="shield" className="shrink-0 text-good" />

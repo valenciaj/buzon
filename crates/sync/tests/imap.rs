@@ -412,7 +412,10 @@ async fn syncs_threads_flags_and_new_mail_with_idle() {
     let t = db.thread(bank.id).await.unwrap().unwrap();
     let html = t.messages[0].html.as_deref().unwrap();
     assert!(!html.contains("script"));
-    assert_eq!(t.messages[0].remote_images, 1);
+    // El píxel espía del banco se quita; no queda ninguna imagen remota.
+    assert_eq!(t.messages[0].remote_images, 0);
+    assert_eq!(t.messages[0].trackers, vec!["banco.example".to_string()]);
+    assert!(!html.contains("pixel.gif"));
     assert!(user_raw_dir(dir.path(), user)
         .join(format!("{}.eml", t.messages[0].id))
         .exists());
@@ -458,6 +461,17 @@ async fn syncs_threads_flags_and_new_mail_with_idle() {
     assert_eq!(ev.account, account.id);
     assert_eq!(ev.user, user);
     assert_eq!(db.threads(&inbox).await.unwrap().len(), 3);
+    // Lo de la primera descarga queda aprobado; el remitente nuevo, por aprobar.
+    assert_eq!(db.sender("ana@ejemplo.es").await.unwrap().unwrap().status, "approved");
+    assert_eq!(db.sender("luis@ejemplo.es").await.unwrap().unwrap().status, "pending");
+    let screener = ThreadQuery {
+        view: Some(buzon_store::flow::View::Screener),
+        limit: 10,
+        ..Default::default()
+    };
+    let waiting = db.threads(&screener).await.unwrap();
+    assert_eq!(waiting.len(), 1);
+    assert_eq!(waiting[0].subject, "Hola");
 
     // Lo que se borra o se lee en otro cliente se refleja al sincronizar.
     {

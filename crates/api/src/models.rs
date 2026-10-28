@@ -255,6 +255,16 @@ pub struct ThreadOut {
     /// Ids de sus etiquetas.
     #[schema(value_type = Vec<String>)]
     pub labels: Vec<Id>,
+    /// En la pila «Responder luego».
+    pub reply_later: bool,
+    /// En la pila «Apartados».
+    pub aside: bool,
+    /// Pospuesto hasta esta fecha (segundos Unix). Si ya pasó, ha reaparecido.
+    pub snooze_until: Option<i64>,
+    /// Tiene nota privada.
+    pub has_note: bool,
+    /// Algún mensaje traía píxeles espía (ya quitados).
+    pub tracked: bool,
 }
 
 impl From<buzon_store::mail::ThreadSummary> for ThreadOut {
@@ -271,6 +281,11 @@ impl From<buzon_store::mail::ThreadSummary> for ThreadOut {
             flagged: t.flagged,
             has_attachments: t.has_attachments,
             labels: t.labels,
+            reply_later: t.flow.reply_later,
+            aside: t.flow.aside,
+            snooze_until: t.flow.snooze_until,
+            has_note: t.flow.has_note,
+            tracked: t.flow.tracked,
         }
     }
 }
@@ -312,6 +327,8 @@ pub struct MessageOut {
     /// las bloquee hasta que la persona las pida.
     pub html: Option<String>,
     pub remote_images: u32,
+    /// Dominios de los píxeles espía que se han quitado.
+    pub trackers: Vec<String>,
     pub attachments: Vec<AttachmentOut>,
 }
 
@@ -325,6 +342,117 @@ pub struct ThreadDetail {
     #[schema(value_type = Vec<String>)]
     pub labels: Vec<Id>,
     pub messages: Vec<MessageOut>,
+    /// Nota privada (solo la ves tú).
+    pub note: String,
+    pub reply_later: bool,
+    pub aside: bool,
+    pub snooze_until: Option<i64>,
+    /// Quien escribe el hilo y lo decidido sobre él (modo Enfoque).
+    pub sender: Option<SenderOut>,
+}
+
+// ---------- Flujo (modo Enfoque) ----------
+
+/// Remitente y lo decidido sobre él.
+#[derive(Serialize, ToSchema)]
+pub struct SenderOut {
+    pub email: String,
+    pub name: String,
+    /// `pending` (por aprobar), `approved` o `blocked`.
+    pub status: String,
+    /// Dónde va su correo: `principal`, `news` (Novedades) o `receipts` (Recibos).
+    pub bucket: String,
+}
+
+impl From<buzon_store::flow::Sender> for SenderOut {
+    fn from(s: buzon_store::flow::Sender) -> Self {
+        SenderOut {
+            email: s.email,
+            name: s.name,
+            status: s.status,
+            bucket: s.bucket,
+        }
+    }
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct SenderSummaryOut {
+    #[serde(flatten)]
+    pub sender: SenderOut,
+    /// Hilos suyos en la entrada.
+    pub threads: i64,
+    /// Su hilo más reciente.
+    #[schema(value_type = Option<String>)]
+    pub last_thread: Option<Id>,
+    pub last_subject: String,
+    pub last_date: i64,
+}
+
+impl From<buzon_store::flow::SenderSummary> for SenderSummaryOut {
+    fn from(s: buzon_store::flow::SenderSummary) -> Self {
+        SenderSummaryOut {
+            sender: s.sender.into(),
+            threads: s.threads,
+            last_thread: s.last_thread,
+            last_subject: s.last_subject,
+            last_date: s.last_date,
+        }
+    }
+}
+
+/// Aprobar, rechazar o cambiar de bandeja a un remitente.
+#[derive(Deserialize, ToSchema)]
+pub struct SenderDecision {
+    pub email: String,
+    /// `approved`, `blocked` o `pending`.
+    pub status: String,
+    /// `principal`, `news` o `receipts`. Sin él, la que tenía (o `principal`).
+    pub bucket: Option<String>,
+}
+
+/// Meter o sacar hilos de las pilas y posponerlos. Lo que falta no cambia.
+#[derive(Deserialize, ToSchema)]
+pub struct ThreadsFlow {
+    #[schema(value_type = Vec<String>)]
+    pub threads: Vec<Id>,
+    pub reply_later: Option<bool>,
+    pub aside: Option<bool>,
+    /// Posponer hasta esta fecha (segundos Unix). `0` lo quita.
+    pub snooze_until: Option<i64>,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct NoteInput {
+    pub note: String,
+}
+
+/// Cuántos hilos hay en cada sitio del modo Enfoque.
+#[derive(Serialize, ToSchema)]
+pub struct FlowCountsOut {
+    pub screener: i64,
+    pub reply_later: i64,
+    pub aside: i64,
+    pub snoozed: i64,
+    /// Pospuestos que ya han reaparecido.
+    pub bubbled: i64,
+    pub principal_unread: i64,
+    pub news_unread: i64,
+    pub receipts_unread: i64,
+}
+
+impl From<buzon_store::flow::FlowCounts> for FlowCountsOut {
+    fn from(c: buzon_store::flow::FlowCounts) -> Self {
+        FlowCountsOut {
+            screener: c.screener,
+            reply_later: c.reply_later,
+            aside: c.aside,
+            snoozed: c.snoozed,
+            bubbled: c.bubbled,
+            principal_unread: c.principal_unread,
+            news_unread: c.news_unread,
+            receipts_unread: c.receipts_unread,
+        }
+    }
 }
 
 /// Cambios en un hilo. `seen` afecta a todos sus mensajes; `flagged: true` destaca el último.

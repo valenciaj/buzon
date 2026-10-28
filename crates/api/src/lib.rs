@@ -27,7 +27,7 @@ pub mod session;
 mod validate;
 
 use error::{ApiError, ApiResult};
-use routes::{accounts, auth, compose, invitations, mail, me, organize, setup};
+use routes::{accounts, auth, compose, flow, invitations, mail, me, organize, setup};
 
 pub struct AppState {
     pub db: AppDb,
@@ -156,6 +156,7 @@ impl AppState {
         organize::labels, organize::create_label, organize::update_label, organize::delete_label,
         organize::rules, organize::create_rule, organize::update_rule, organize::delete_rule,
         organize::book, organize::create_entry, organize::update_entry, organize::delete_entry, organize::import_vcard,
+        flow::counts, flow::senders, flow::decide, flow::set_flow, flow::set_note,
         invitations::create, invitations::list, invitations::revoke, invitations::check, invitations::accept,
     ),
     tags(
@@ -166,6 +167,7 @@ impl AppState {
         (name = "mail", description = "Carpetas, hilos, mensajes y avisos en vivo"),
         (name = "compose", description = "Redactar y enviar: identidades, firmas, borradores y adjuntos"),
         (name = "organize", description = "Mover y borrar hilos, etiquetas, filtros automáticos y contactos"),
+        (name = "flow", description = "Modo Enfoque: filtro de remitentes, Principal/Novedades/Recibos, pilas, pospuestos y notas"),
         (name = "invitations", description = "Registro por invitación (caduca a las 72 h)"),
     )
 )]
@@ -253,6 +255,10 @@ pub fn api_router(state: Arc<AppState>) -> Router {
         .route("/threads/delete", post(organize::delete_threads))
         .route("/threads/flags", post(organize::flag_threads))
         .route("/threads/labels", post(organize::label_threads))
+        .route("/threads/flow", post(flow::set_flow))
+        .route("/threads/{id}/note", put(flow::set_note))
+        .route("/flow", get(flow::counts))
+        .route("/senders", get(flow::senders).put(flow::decide))
         .route("/labels", get(organize::labels).post(organize::create_label))
         .route(
             "/labels/{id}",

@@ -81,6 +81,13 @@ export interface ThreadSummary {
   flagged: boolean
   has_attachments: boolean
   labels: string[]
+  reply_later: boolean
+  aside: boolean
+  /** Pospuesto hasta esta fecha (segundos). Si ya pasó, ha reaparecido. */
+  snooze_until: number | null
+  has_note: boolean
+  /** Traía píxeles espía (ya quitados). */
+  tracked: boolean
 }
 
 export interface ThreadPage {
@@ -111,6 +118,8 @@ export interface Message {
   text: string | null
   html: string | null
   remote_images: number
+  /** Dominios de los píxeles espía quitados. */
+  trackers: string[]
   attachments: AttachmentInfo[]
 }
 
@@ -120,6 +129,48 @@ export interface Thread {
   subject: string
   labels: string[]
   messages: Message[]
+  note: string
+  reply_later: boolean
+  aside: boolean
+  snooze_until: number | null
+  sender: Sender | null
+}
+
+/** Bandejas y pilas del modo Enfoque. */
+export type View = 'principal' | 'news' | 'receipts' | 'screener' | 'blocked' | 'reply_later' | 'aside' | 'snoozed' | 'bubbled'
+export type Bucket = 'principal' | 'news' | 'receipts'
+export type SenderStatus = 'pending' | 'approved' | 'blocked'
+
+export interface Sender {
+  email: string
+  name: string
+  status: SenderStatus
+  bucket: Bucket
+}
+
+export interface SenderSummary extends Sender {
+  threads: number
+  last_thread: string | null
+  last_subject: string
+  last_date: number
+}
+
+export interface FlowCounts {
+  screener: number
+  reply_later: number
+  aside: number
+  snoozed: number
+  bubbled: number
+  principal_unread: number
+  news_unread: number
+  receipts_unread: number
+}
+
+/** Cambios en las pilas. `snooze_until: 0` quita lo pospuesto. */
+export interface FlowChange {
+  reply_later?: boolean
+  aside?: boolean
+  snooze_until?: number
 }
 
 export interface ThreadFilter {
@@ -129,6 +180,7 @@ export interface ThreadFilter {
   label?: string
   /** Búsqueda (texto libre y `de:`, `tiene:adjunto`…). */
   q?: string
+  view?: View
 }
 
 export interface InvitationOut {
@@ -330,6 +382,12 @@ export const api = {
   createRule: (r: RuleInput) => call<Rule>('POST', '/rules', r),
   updateRule: (id: string, r: RuleInput) => call<Rule>('PUT', `/rules/${id}`, r),
   deleteRule: (id: string) => call<void>('DELETE', `/rules/${id}`),
+  flowCounts: (account?: string) => call<FlowCounts>('GET', `/flow${query({ account })}`),
+  senders: (status?: SenderStatus) => call<SenderSummary[]>('GET', `/senders${query({ status })}`),
+  decideSender: (email: string, status: SenderStatus, bucket?: Bucket) =>
+    call<Sender>('PUT', '/senders', { email, status, bucket }),
+  setFlow: (threads: string[], change: FlowChange) => call<void>('POST', '/threads/flow', { threads, ...change }),
+  setNote: (id: string, note: string) => call<void>('PUT', `/threads/${id}/note`, { note }),
   invitations: () => call<InvitationOut[]>('GET', '/invitations'),
   createInvitation: (note?: string) =>
     call<{ id: string; url: string; expires_at: number }>('POST', '/invitations', { note }),

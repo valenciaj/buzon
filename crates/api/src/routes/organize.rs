@@ -29,7 +29,7 @@ fn parse_id(s: &str, what: &str) -> ApiResult<Id> {
     s.parse().map_err(|_| ApiError::not_found(format!("{what} no existe.")))
 }
 
-fn check_threads(t: &[Id]) -> ApiResult<()> {
+pub(crate) fn check_threads(t: &[Id]) -> ApiResult<()> {
     if t.is_empty() || t.len() > MAX_THREADS {
         return Err(ApiError::bad_request(format!("Indica entre 1 y {MAX_THREADS} hilos.")));
     }
@@ -51,7 +51,7 @@ fn place(role: Option<String>, mailbox: Option<Id>, roles: &[&str]) -> ApiResult
 }
 
 /// Cuentas de los hilos, para avisar a las demás pestañas.
-async fn accounts_of(udb: &UserDb, threads: &[Id]) -> ApiResult<Vec<Id>> {
+pub(crate) async fn accounts_of(udb: &UserDb, threads: &[Id]) -> ApiResult<Vec<Id>> {
     let mut out = Vec::new();
     for t in threads.iter().take(50) {
         if let Some(th) = udb.thread(*t).await? {
@@ -81,6 +81,7 @@ pub async fn move_threads(
         .ok_or_else(|| ApiError::bad_request("Indica adónde mover (to_role o to_mailbox)."))?;
     let udb = st.user_db(cu.user.id).await?;
     let ops = udb.move_messages(&req.threads, &[], from.as_ref(), &to).await?;
+    udb.clear_bubbled(&req.threads).await?;
     st.sync.move_messages(&ops);
     let mut accounts: Vec<Id> = ops.iter().map(|o| o.account_id).collect();
     accounts.dedup();

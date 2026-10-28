@@ -69,6 +69,10 @@ pub struct NewMessage {
     pub html: Option<String>,
     pub remote_images: u32,
     pub attachments: Vec<Attachment>,
+    /// Qué parece por sus cabeceras: `principal`, `news` o `receipts`.
+    pub kind: String,
+    /// Dominios de los píxeles espía quitados del HTML.
+    pub trackers: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -92,6 +96,10 @@ pub struct ThreadQuery {
     pub label: Option<Id>,
     /// Búsqueda: algún mensaje del hilo debe cumplirla entera.
     pub search: Option<crate::organize::Search>,
+    /// Bandeja o pila del modo Enfoque.
+    pub view: Option<crate::flow::View>,
+    /// Ahora, para lo pospuesto.
+    pub now: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -107,6 +115,7 @@ pub struct ThreadSummary {
     pub flagged: bool,
     pub has_attachments: bool,
     pub labels: Vec<Id>,
+    pub flow: crate::flow::ThreadFlow,
 }
 
 #[derive(Debug, Clone)]
@@ -125,6 +134,7 @@ pub struct StoredMessage {
     pub html: Option<String>,
     pub remote_images: u32,
     pub attachments: Vec<Attachment>,
+    pub trackers: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -133,6 +143,8 @@ pub struct Thread {
     pub account_id: Id,
     pub subject: String,
     pub messages: Vec<StoredMessage>,
+    pub flow: crate::flow::ThreadFlow,
+    pub note: String,
 }
 
 /// Mensaje que hay que cambiar también en el servidor IMAP.
@@ -451,9 +463,17 @@ impl UserDb {
                         .bind(o)
                         .execute(&mut *tx)
                         .await?;
-                    sqlx::query("UPDATE threads SET last_date = MAX(last_date, (SELECT last_date FROM threads WHERE id = ?)) WHERE id = ?")
-                        .bind(o)
-                        .bind(keep)
+                    // También las pilas, lo pospuesto y la nota.
+                    sqlx::query(
+                        "UPDATE threads SET last_date = MAX(last_date, o.last_date), \
+                         reply_later = COALESCE(threads.reply_later, o.reply_later), aside = COALESCE(threads.aside, o.aside), \
+                         snooze_until = COALESCE(threads.snooze_until, o.snooze_until), \
+                         note = CASE WHEN threads.note = '' THEN o.note WHEN o.note = '' THEN threads.note \
+                                ELSE threads.note || char(10) || char(10) || o.note END \
+                         FROM (SELECT * FROM threads WHERE id = ?) AS o WHERE threads.id = ?",
+                    )
+                    .bind(o)
+                    .bind(keep)
                         .execute(&mut *tx)
                         .await?;
                     sqlx::query("DELETE FROM threads WHERE id = ?")
@@ -483,8 +503,8 @@ impl UserDb {
 
         sqlx::query(
             "INSERT INTO messages (id, account_id, mailbox_id, uid, thread_id, message_id, in_reply_to, refs, subject, \
-             from_name, from_addr, to_json, cc_json, date, snippet, size, seen, flagged, answered, has_attachments) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             from_name, from_addr, to_json, cc_json, date, snippet, size, seen, flagged, answered, has_attachments, kind) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(b(m.id))
         .bind(b(m.account_id))
@@ -506,17 +526,19 @@ impl UserDb {
         .bind(m.flags.flagged)
         .bind(m.flags.answered)
         .bind(m.attachments.iter().any(|a| !a.inline))
+        .bind(&m.kind)
         .execute(&mut *tx)
         .await?;
         sqlx::query(
-            "INSERT INTO message_bodies (message_id, text, html, remote_images, attachments) VALUES (?, ?, ?, ?, ?) \
-             ON CONFLICT (message_id) DO NOTHING",
+            "INSERT INTO message_bodies (message_id, text, html, remote_images, attachments, trackers) \
+             VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (message_id) DO NOTHING",
         )
         .bind(b(m.id))
         .bind(&m.text)
         .bind(&m.html)
         .bind(m.remote_images as i64)
         .bind(serde_json::to_string(&m.attachments).unwrap_or_else(|_| "[]".into()))
+        .bind(serde_json::to_string(&m.trackers).unwrap_or_else(|_| "[]".into()))
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
@@ -552,7 +574,10 @@ impl UserDb {
              (SELECT snippet FROM messages WHERE thread_id = t.id ORDER BY date DESC LIMIT 1) AS snippet, \
              (SELECT group_concat(who, char(31)) FROM (SELECT COALESCE(from_name, from_addr, '') AS who, MAX(date) AS d \
                 FROM messages WHERE thread_id = t.id GROUP BY who ORDER BY d)) AS people, \
-             (SELECT group_concat(hex(label_id)) FROM thread_labels WHERE thread_id = t.id) AS labels \
+             (SELECT group_concat(hex(label_id)) FROM thread_labels WHERE thread_id = t.id) AS labels, \
+             t.reply_later, t.aside, t.snooze_until, t.note <> '' AS has_note, \
+             (SELECT MAX(json_array_length(bd.trackers)) FROM messages mt JOIN message_bodies bd ON bd.message_id = mt.id \
+                WHERE mt.thread_id = t.id) > 0 AS tracked \
              FROM threads t WHERE EXISTS (SELECT 1 FROM messages m JOIN mailboxes mb ON mb.id = m.mailbox_id \
              WHERE m.thread_id = t.id",
         );
@@ -573,6 +598,9 @@ impl UserDb {
         }
         if let Some(a) = q.account {
             s.push(" AND t.account_id = ").push_bind(b(a));
+        }
+        if let Some(v) = q.view {
+            v.push_conditions(&mut s, q.now);
         }
         if let Some((date, id)) = q.before {
             s.push(" AND (t.last_date, t.id) < (")
@@ -609,6 +637,13 @@ impl UserDb {
                         .split(',')
                         .filter_map(crate::organize::id_from_hex)
                         .collect(),
+                    flow: crate::flow::ThreadFlow {
+                        reply_later: r.try_get::<Option<i64>, _>("reply_later")?.is_some(),
+                        aside: r.try_get::<Option<i64>, _>("aside")?.is_some(),
+                        snooze_until: r.try_get("snooze_until")?,
+                        has_note: r.try_get("has_note")?,
+                        tracked: r.try_get::<Option<bool>, _>("tracked")?.unwrap_or(false),
+                    },
                 })
             })
             .collect()
@@ -616,15 +651,17 @@ impl UserDb {
 
     /// Hilo completo, con los mensajes repetidos en varias carpetas una sola vez.
     pub async fn thread(&self, id: Id) -> Result<Option<Thread>> {
-        let Some(t) = sqlx::query("SELECT id, account_id, subject FROM threads WHERE id = ?")
-            .bind(b(id))
-            .fetch_optional(&self.pool)
-            .await?
+        let Some(t) = sqlx::query(
+            "SELECT id, account_id, subject, reply_later, aside, snooze_until, note FROM threads WHERE id = ?",
+        )
+        .bind(b(id))
+        .fetch_optional(&self.pool)
+        .await?
         else {
             return Ok(None);
         };
         let rows = sqlx::query(
-            "SELECT m.*, mb.role, bd.text, bd.html, bd.remote_images, bd.attachments FROM messages m \
+            "SELECT m.*, mb.role, bd.text, bd.html, bd.remote_images, bd.attachments, bd.trackers FROM messages m \
              JOIN mailboxes mb ON mb.id = m.mailbox_id LEFT JOIN message_bodies bd ON bd.message_id = m.id \
              WHERE m.thread_id = ? ORDER BY m.date, (mb.role = 'inbox') DESC, m.id",
         )
@@ -666,12 +703,25 @@ impl UserDb {
                     .try_get::<Option<&str>, _>("attachments")?
                     .and_then(|j| serde_json::from_str(j).ok())
                     .unwrap_or_default(),
+                trackers: r
+                    .try_get::<Option<&str>, _>("trackers")?
+                    .and_then(|j| serde_json::from_str(j).ok())
+                    .unwrap_or_default(),
             });
         }
+        let note: String = t.try_get("note")?;
         Ok(Some(Thread {
             id: id_of(&t, "id")?,
             account_id: id_of(&t, "account_id")?,
             subject: t.try_get("subject")?,
+            flow: crate::flow::ThreadFlow {
+                reply_later: t.try_get::<Option<i64>, _>("reply_later")?.is_some(),
+                aside: t.try_get::<Option<i64>, _>("aside")?.is_some(),
+                snooze_until: t.try_get("snooze_until")?,
+                has_note: !note.is_empty(),
+                tracked: messages.iter().any(|m| !m.trackers.is_empty()),
+            },
+            note,
             messages,
         }))
     }
@@ -784,6 +834,8 @@ mod tests {
             html: None,
             remote_images: 0,
             attachments: vec![],
+            kind: "principal".into(),
+            trackers: vec![],
         }
     }
 

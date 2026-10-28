@@ -1243,3 +1243,128 @@ async fn rules_and_address_book() {
         StatusCode::NO_CONTENT
     );
 }
+
+#[tokio::test]
+async fn focus_flow_screener_piles_and_notes() {
+    let t = app().await;
+    let cookie = t.setup().await;
+    let (thread, msg) = seed_mail(&t, &cookie).await;
+    let me = t.call("GET", "/api/v1/me", Some(&cookie), None).await;
+    let user: Id = me.body["id"].as_str().unwrap().parse().unwrap();
+    let udb = UserDb::open(t.dir.path(), user).await.unwrap();
+    // El correo llegó después de la primera descarga: su remitente espera aprobación.
+    let from = udb.thread(thread).await.unwrap().unwrap().messages[0]
+        .from
+        .clone()
+        .unwrap();
+    assert!(udb.screen_sender(&from, "principal", true).await.unwrap());
+    let ids = |r: &Res| -> Vec<String> {
+        r.body["threads"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|x| x["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let view = |v: &str| format!("/api/v1/threads?view={v}");
+    let tid = thread.to_base58();
+
+    let r = t.call("GET", &view("screener"), Some(&cookie), None).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    assert_eq!(ids(&r), std::slice::from_ref(&tid));
+    assert!(ids(&t.call("GET", &view("principal"), Some(&cookie), None).await).is_empty());
+    assert_eq!(
+        t.call("GET", &view("nada"), Some(&cookie), None).await.status,
+        StatusCode::BAD_REQUEST
+    );
+    let pending = t
+        .call("GET", "/api/v1/senders?status=pending", Some(&cookie), None)
+        .await;
+    assert_eq!(pending.body[0]["email"], from.email);
+    assert_eq!(pending.body[0]["last_thread"], tid);
+    let counts = t.call("GET", "/api/v1/flow", Some(&cookie), None).await;
+    assert_eq!(counts.body["screener"], 1, "{}", counts.body);
+
+    // Aprobar, a Novedades.
+    let bad = json!({"email": from.email, "status": "quizá"});
+    assert_eq!(
+        t.call("PUT", "/api/v1/senders", Some(&cookie), Some(bad)).await.status,
+        StatusCode::BAD_REQUEST
+    );
+    let ok = t
+        .call(
+            "PUT",
+            "/api/v1/senders",
+            Some(&cookie),
+            Some(json!({"email": from.email, "status": "approved", "bucket": "news"})),
+        )
+        .await;
+    assert_eq!(ok.status, StatusCode::OK, "{}", ok.body);
+    assert_eq!(ok.body["bucket"], "news");
+    assert_eq!(
+        ids(&t.call("GET", &view("news"), Some(&cookie), None).await),
+        std::slice::from_ref(&tid)
+    );
+    let detail = t
+        .call("GET", &format!("/api/v1/threads/{tid}"), Some(&cookie), None)
+        .await;
+    assert_eq!(detail.body["sender"]["status"], "approved");
+    assert_eq!(detail.body["messages"][0]["trackers"], json!([]));
+
+    // Pilas y pospuestos.
+    let flow = |body: serde_json::Value| t.call("POST", "/api/v1/threads/flow", Some(&cookie), Some(body));
+    assert_eq!(flow(json!({"threads": [tid]})).await.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        flow(json!({"threads": [tid], "reply_later": true})).await.status,
+        StatusCode::NO_CONTENT
+    );
+    let rl = t.call("GET", &view("reply_later"), Some(&cookie), None).await;
+    assert_eq!(ids(&rl), std::slice::from_ref(&tid));
+    assert_eq!(rl.body["threads"][0]["reply_later"], true);
+    assert!(ids(&t.call("GET", &view("news"), Some(&cookie), None).await).is_empty());
+    assert_eq!(
+        flow(json!({"threads": [tid], "snooze_until": 1})).await.status,
+        StatusCode::BAD_REQUEST
+    );
+    let later = buzon_store::now() + 86_400;
+    assert_eq!(
+        flow(json!({"threads": [tid], "snooze_until": later})).await.status,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        ids(&t.call("GET", &view("snoozed"), Some(&cookie), None).await),
+        std::slice::from_ref(&tid)
+    );
+    assert!(ids(&t.call("GET", &view("reply_later"), Some(&cookie), None).await).is_empty());
+    assert_eq!(
+        flow(json!({"threads": [tid], "snooze_until": 0, "reply_later": false}))
+            .await
+            .status,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        ids(&t.call("GET", &view("news"), Some(&cookie), None).await),
+        std::slice::from_ref(&tid)
+    );
+
+    // Nota privada.
+    for (id, status) in [
+        (tid.clone(), StatusCode::NO_CONTENT),
+        (Id::new().to_base58(), StatusCode::NOT_FOUND),
+    ] {
+        let url = format!("/api/v1/threads/{id}/note");
+        let r = t
+            .call("PUT", &url, Some(&cookie), Some(json!({"note": "Llevar vino"})))
+            .await;
+        assert_eq!(r.status, status);
+    }
+    let detail = t
+        .call("GET", &format!("/api/v1/threads/{tid}"), Some(&cookie), None)
+        .await;
+    assert_eq!(detail.body["note"], "Llevar vino");
+    assert_eq!(
+        t.call("GET", &view("news"), Some(&cookie), None).await.body["threads"][0]["has_note"],
+        true
+    );
+    let _ = msg;
+}
