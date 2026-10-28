@@ -7,6 +7,7 @@ const KEYS: [string, string][] = [
   ['j', 'next'], ['k', 'prev'], ['o', 'openThread'], ['u', 'close'],
   ['e', 'archive'], ['#', 'trash'], ['!', 'junk'], ['s', 'star'],
   ['⇧ I', 'read'], ['⇧ U', 'unread'], ['x', 'select'],
+  ['l', 'replyLater'], ['p', 'aside'], ['b', 'snooze'],
   ['r', 'reply'], ['a', 'replyAll'], ['f', 'forward'], ['c', 'compose'], ['/', 'search'],
   ['g i', 'goInbox'], ['g s', 'goSent'], ['g d', 'goDrafts'], ['g a', 'goArchive'], ['?', 'help'],
 ]

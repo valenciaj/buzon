@@ -1,6 +1,6 @@
 // Utilidades del correo: carpetas, fechas, nombres y el documento del lector.
 
-import type { Mailbox, Role } from './api'
+import type { Mailbox, Role, View } from './api'
 
 export const ROLE_ORDER: Role[] = ['inbox', 'sent', 'drafts', 'archive', 'junk', 'trash']
 export const ACCOUNT_COLORS = ['#2f9a72', '#c4683a', '#7a3fa0', '#3d7fb5', '#a8862a']
@@ -9,17 +9,20 @@ export const ACCOUNT_COLORS = ['#2f9a72', '#c4683a', '#7a3fa0', '#3d7fb5', '#a88
  * Lo que se está viendo: un tipo de carpeta (en una cuenta o en todas), una carpeta
  * concreta o una etiqueta.
  */
-export type Box = { role: Role } | { mailbox: string } | { label: string }
+export type Box = { role: Role } | { mailbox: string } | { label: string } | { view: View }
+
+export const VIEWS: View[] = ['principal', 'news', 'receipts', 'screener', 'blocked', 'reply_later', 'aside', 'snoozed', 'bubbled']
 
 export function parseBox(s: string | null): Box {
   if (s?.startsWith('m:')) return { mailbox: s.slice(2) }
   if (s?.startsWith('l:')) return { label: s.slice(2) }
+  if (s?.startsWith('v:') && (VIEWS as string[]).includes(s.slice(2))) return { view: s.slice(2) as View }
   if (s && (ROLE_ORDER as string[]).includes(s)) return { role: s as Role }
   return { role: 'inbox' }
 }
 
 export function boxKey(b: Box): string {
-  return 'role' in b ? b.role : 'mailbox' in b ? `m:${b.mailbox}` : `l:${b.label}`
+  return 'role' in b ? b.role : 'mailbox' in b ? `m:${b.mailbox}` : 'label' in b ? `l:${b.label}` : `v:${b.view}`
 }
 
 /** Acciones que tienen sentido para los hilos de una carpeta. */
@@ -38,6 +41,23 @@ export function actionsFor(role: Role | null | undefined): MailAction[] {
     default:
       return ['archive', 'trash', 'junk']
   }
+}
+
+/** Opciones de «Posponer»: esta tarde, mañana, el fin de semana y la semana que viene. */
+export type SnoozeOption = 'tonight' | 'tomorrow' | 'weekend' | 'nextWeek'
+
+export function snoozeOptions(now = new Date()): { key: SnoozeOption; at: Date }[] {
+  const at = (days: number, hour: number) => {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + days, hour, 0, 0, 0)
+    return d
+  }
+  const out: { key: SnoozeOption; at: Date }[] = []
+  if (now.getHours() < 17) out.push({ key: 'tonight', at: at(0, 18) })
+  out.push({ key: 'tomorrow', at: at(1, 8) })
+  const day = now.getDay() // 0 domingo … 6 sábado
+  if (day >= 1 && day <= 4) out.push({ key: 'weekend', at: at(6 - day, 9) })
+  out.push({ key: 'nextWeek', at: at(((8 - day) % 7) || 7, 8) })
+  return out
 }
 
 export const LABEL_COLORS = ['#2f9a72', '#3d7fb5', '#7a3fa0', '#c4683a', '#a8862a', '#c2415b', '#5b6b7f']

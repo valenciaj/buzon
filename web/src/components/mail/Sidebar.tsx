@@ -2,13 +2,19 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
-import { api, type Account, type Mailbox, type Me, type Role } from '../../lib/api'
+import { api, type Account, type Mailbox, type Me, type Role, type View } from '../../lib/api'
 import { ACCOUNT_COLORS, boxKey, customFolders, ROLE_ORDER, unreadByRole, type Box } from '../../lib/mail'
 import { Logo } from '../ui'
 import { Icon } from './Icons'
 
-/** En Enfoque se ven pocas bandejas; el resto queda en «Más carpetas». */
-const FOCUS_MAIN: Role[] = ['inbox', 'sent', 'drafts']
+/** En Enfoque, la entrada se reparte en bandejas y pilas; el resto queda en «Más carpetas». */
+const FOCUS_MAIN: Role[] = ['sent', 'drafts']
+const FOCUS_BOXES: View[] = ['principal', 'news', 'receipts', 'screener']
+const FOCUS_PILES: View[] = ['reply_later', 'aside', 'snoozed']
+export const VIEW_ICONS: Record<View, string> = {
+  principal: 'inbox', news: 'news', receipts: 'receipt', screener: 'screener', blocked: 'junk',
+  reply_later: 'later', aside: 'pin', snoozed: 'clock', bubbled: 'clock',
+}
 
 export function Sidebar({ me, accounts, mailboxes, account, box, onAccount, onBox, onLogout, onCompose }: {
   me: Me
@@ -26,15 +32,31 @@ export function Sidebar({ me, accounts, mailboxes, account, box, onAccount, onBo
   const focus = me.preferences.mode === 'focus'
   const [more, setMore] = useState(false)
   const labels = useQuery({ queryKey: ['labels'], queryFn: api.labels })
+  const flow = useQuery({ queryKey: ['flow', account ?? null], queryFn: () => api.flowCounts(account), enabled: focus })
+  const counts = flow.data
+  const viewCount = (v: View): number => {
+    if (!counts) return 0
+    switch (v) {
+      case 'principal': return counts.principal_unread + counts.bubbled
+      case 'news': return counts.news_unread
+      case 'receipts': return counts.receipts_unread
+      case 'screener': return counts.screener
+      case 'reply_later': return counts.reply_later
+      case 'aside': return counts.aside
+      case 'snoozed': return counts.snoozed
+      default: return 0
+    }
+  }
   const unread = unreadByRole(mailboxes, account)
   const present = new Set(mailboxes.filter((m) => !account || m.account_id === account).map((m) => m.role))
   const roles = ROLE_ORDER.filter((r) => r === 'inbox' || present.has(r))
   const main = focus ? roles.filter((r) => FOCUS_MAIN.includes(r)) : roles
+  // En Enfoque, la entrada completa (sin repartir) también está, entre las demás carpetas.
   const extraRoles = focus ? roles.filter((r) => !FOCUS_MAIN.includes(r)) : []
   const folders = customFolders(mailboxes, account)
   const current = boxKey(box)
   const color = (id: string) => ACCOUNT_COLORS[accounts.findIndex((a) => a.id === id) % ACCOUNT_COLORS.length]
-  const roleLabel = (r: Role) => t(`mail.roles.${focus && r === 'inbox' ? 'principal' : r}`)
+  const roleLabel = (r: Role) => t(`mail.roles.${r}`)
   const showMore = !focus || more || extraRoles.some((r) => boxKey({ role: r }) === current)
     || folders.some((f) => boxKey({ mailbox: f.id }) === current)
 
@@ -47,7 +69,7 @@ export function Sidebar({ me, accounts, mailboxes, account, box, onAccount, onBo
           : <Icon name={icon} className="shrink-0 text-muted" />}
         <span className="min-w-0 flex-1 truncate">{label}</span>
         {dot && <span className="size-2 shrink-0 rounded-full" style={{ background: dot }} />}
-        {count > 0 && <span className={`text-sm tabular-nums ${key === 'inbox' ? 'font-bold text-accent' : 'text-muted'}`}>{count}</span>}
+        {count > 0 && <span className={`text-sm tabular-nums ${key === 'inbox' || key === 'v:principal' || key === 'v:screener' ? 'font-bold text-accent' : 'text-muted'}`}>{count}</span>}
       </button>
     </li>
   )
@@ -76,6 +98,19 @@ export function Sidebar({ me, accounts, mailboxes, account, box, onAccount, onBo
             ))}
           </div>
         </div>
+      )}
+      {focus && (
+        <>
+          <ul className="flex flex-col gap-0.5">
+            {FOCUS_BOXES.map((v) => item(`v:${v}`, t(`flow.views.${v}`), VIEW_ICONS[v], viewCount(v), () => onBox({ view: v })))}
+          </ul>
+          <div className="flex flex-col gap-1">
+            <p className="eyebrow px-3">{t('flow.piles')}</p>
+            <ul className="flex flex-col gap-0.5">
+              {FOCUS_PILES.map((v) => item(`v:${v}`, t(`flow.views.${v}`), VIEW_ICONS[v], viewCount(v), () => onBox({ view: v })))}
+            </ul>
+          </div>
+        </>
       )}
       <ul className="flex flex-col gap-0.5">
         {main.map((r) => item(r, roleLabel(r), r, r === 'inbox' || r === 'junk' || !focus ? unread[r] ?? 0 : 0, () => onBox({ role: r })))}

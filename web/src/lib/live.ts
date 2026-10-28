@@ -11,6 +11,8 @@ export function useLiveUpdates() {
       qc.invalidateQueries({ queryKey: ['threads'] })
       qc.invalidateQueries({ queryKey: ['mailboxes'] })
       qc.invalidateQueries({ queryKey: ['thread'] })
+      qc.invalidateQueries({ queryKey: ['flow'] })
+      qc.invalidateQueries({ queryKey: ['senders'] })
     }
     const status = () => qc.invalidateQueries({ queryKey: ['accounts'] })
     es.addEventListener('mail', mail)

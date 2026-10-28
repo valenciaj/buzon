@@ -581,6 +581,12 @@ async fn fetch_batch(
             .map_err(|_| crate::Error::Config("análisis interrumpido"))?;
         tokio::fs::write(ctx.raw_dir.join(format!("{id}.eml")), &raw).await?;
         let thread = ctx.db.insert_message(&msg).await?;
+        // Remitentes nuevos: lo que llega después de la primera descarga espera aprobación.
+        if mb.role.as_deref() == Some("inbox") {
+            if let Some(from) = &msg.from {
+                ctx.db.screen_sender(from, &msg.kind, rules.is_some()).await?;
+            }
+        }
         if let Some(rules) = rules {
             let actions = organize::apply_rules(
                 rules,

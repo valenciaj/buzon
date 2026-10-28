@@ -38,6 +38,13 @@ const PATHS: Record<string, React.ReactNode> = {
   contacts: <><circle cx="12" cy="8.5" r="3.5" /><path d="M5 20a7 7 0 0 1 14 0" /></>,
   keyboard: <><rect x="2.5" y="6" width="19" height="12" rx="2" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" /></>,
   sliders: <><path d="M4 7h10M18 7h2M4 17h4M12 17h8" /><circle cx="16" cy="7" r="2" /><circle cx="10" cy="17" r="2" /></>,
+  clock: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></>,
+  later: <><path d="M9 14 4 9l5-5" /><path d="M4 9h9a6 6 0 0 1 6 6v1" /><circle cx="18.5" cy="19" r=".6" /></>,
+  pin: <><path d="M9 4h6l-1 6 3 3H7l3-3z" /><path d="M12 13v7" /></>,
+  note: <><path d="M5 4h14v11l-5 5H5z" /><path d="M14 20v-5h5M8.5 9h7M8.5 12.5h4" /></>,
+  screener: <><circle cx="10" cy="8.5" r="3.5" /><path d="M3.5 20a6.5 6.5 0 0 1 11.2-4.5" /><path d="M16 18l2 2 4-4" /></>,
+  news: <><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><path d="M7 9h10M7 12.5h10M7 16h6" /></>,
+  receipt: <><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" /><path d="M9 8h6M9 12h6" /></>,
   link: <><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></>,
 }
 

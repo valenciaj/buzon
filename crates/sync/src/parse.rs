@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
+use buzon_store::flow::guess_kind;
 use buzon_store::mail::{Addr, Attachment, Flags, NewMessage};
 use buzon_store::Id;
 use mail_parser::{Address, HeaderValue, MessageParser, MimeHeaders};
@@ -87,6 +88,8 @@ pub fn parse(raw: &[u8], env: Envelope) -> NewMessage {
         html: None,
         remote_images: 0,
         attachments: Vec::new(),
+        kind: "principal".into(),
+        trackers: Vec::new(),
     };
     let Some(msg) = MessageParser::default().parse(raw) else {
         m.text = Some(String::from_utf8_lossy(raw).into_owned());
@@ -103,6 +106,12 @@ pub fn parse(raw: &[u8], env: Envelope) -> NewMessage {
     if let Some(d) = msg.date() {
         m.date = d.to_timestamp();
     }
+    let list = msg.header_raw("List-Unsubscribe").is_some() || msg.header_raw("List-Id").is_some();
+    let bulk = msg
+        .header_raw("Precedence")
+        .is_some_and(|p| matches!(p.trim().to_ascii_lowercase().as_str(), "bulk" | "list" | "junk"));
+    let from_email = m.from.as_ref().map(|a| a.email.as_str()).unwrap_or("");
+    m.kind = guess_kind(list, bulk, from_email, &m.subject).into();
 
     let mut cids = HashMap::new();
     for (i, part) in msg.attachments().enumerate() {
@@ -136,6 +145,8 @@ pub fn parse(raw: &[u8], env: Envelope) -> NewMessage {
     let has_html = msg.html_bodies().any(|p| p.is_content_type("text", "html"));
     if has_html {
         if let Some(html) = msg.body_html(0) {
+            let (html, trackers) = strip_trackers(&html);
+            m.trackers = trackers;
             let clean = sanitize_html(&html, &cids);
             m.remote_images = clean.remote_images;
             for a in &mut m.attachments {
@@ -156,6 +167,143 @@ pub fn attachment(raw: &[u8], index: u32) -> Option<Vec<u8>> {
     let msg = MessageParser::default().parse(raw)?;
     let part = msg.attachments().nth(index as usize)?;
     Some(part.contents().to_vec())
+}
+
+/// Servicios conocidos de seguimiento de aperturas.
+const TRACKER_HOSTS: [&str; 16] = [
+    "list-manage.com",
+    "mailtrack.io",
+    "mailfoogae.appspot.com",
+    "yesware.com",
+    "bananatag.com",
+    "superhuman.com",
+    "google-analytics.com",
+    "mixpanel.com",
+    "hubspotemail.net",
+    "hs-analytics.net",
+    "mandrillapp.com",
+    "sparkpostmail.com",
+    "customeriomail.com",
+    "mailgun.org",
+    "emltrk.com",
+    "pixel.watch",
+];
+
+/// Rutas típicas de un píxel de apertura.
+const TRACKER_PATHS: [&str; 9] = [
+    "/track/open",
+    "/open.gif",
+    "/open.php",
+    "/wf/open",
+    "/pixel.gif",
+    "/beacon",
+    "/trk/",
+    "/e/o/",
+    "/o.gif",
+];
+
+/// Atributo de una etiqueta HTML (sin entender entidades: basta para decidir).
+fn tag_attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+    let lower = tag.to_ascii_lowercase();
+    let mut from = 0;
+    while let Some(i) = lower[from..].find(name) {
+        let at = from + i;
+        from = at + name.len();
+        let before = lower[..at].chars().last().unwrap_or(' ');
+        if !before.is_whitespace() {
+            continue;
+        }
+        let rest = lower[at + name.len()..].trim_start();
+        let Some(rest) = rest.strip_prefix('=') else { continue };
+        let skipped = lower.len() - rest.len();
+        let raw = &tag[skipped..];
+        let trimmed = raw.trim_start();
+        let start = skipped + (raw.len() - trimmed.len());
+        let value = match trimmed.chars().next() {
+            Some(q @ ('"' | '\'')) => {
+                let body = &tag[start + 1..];
+                &body[..body.find(q).unwrap_or(body.len())]
+            }
+            _ => {
+                let body = &tag[start..];
+                &body[..body
+                    .find(|c: char| c.is_whitespace() || c == '>' || c == '/')
+                    .unwrap_or(body.len())]
+            }
+        };
+        return Some(value);
+    }
+    None
+}
+
+fn tiny(v: Option<&str>) -> bool {
+    v.and_then(|v| v.trim().trim_end_matches("px").parse::<f32>().ok())
+        .is_some_and(|n| n <= 1.0)
+}
+
+/// El dominio que se enseña a la persona: el del servicio, sin subdominios.
+fn tracker_name(host: &str) -> String {
+    let parts: Vec<&str> = host.split('.').filter(|p| !p.is_empty()).collect();
+    parts[parts.len().saturating_sub(2)..].join(".")
+}
+
+/// Si una imagen es un píxel espía, el dominio que lo sirve.
+fn tracker_of(tag: &str) -> Option<String> {
+    let src = tag_attr(tag, "src")?.trim();
+    let lower = src.to_ascii_lowercase();
+    let rest = lower
+        .strip_prefix("https://")
+        .or_else(|| lower.strip_prefix("http://"))
+        .or_else(|| lower.strip_prefix("//"))?;
+    let (host, path) = rest.split_at(rest.find(['/', '?']).unwrap_or(rest.len()));
+    let host = host
+        .rsplit('@')
+        .next()
+        .unwrap_or(host)
+        .split(':')
+        .next()
+        .unwrap_or(host);
+    let style = tag_attr(tag, "style")
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .replace(' ', "");
+    let hidden = style.contains("display:none") || style.contains("visibility:hidden");
+    let small = (tiny(tag_attr(tag, "width")) && tiny(tag_attr(tag, "height")))
+        || (style.contains("width:1px") && style.contains("height:1px"))
+        || (style.contains("width:0") && style.contains("height:0"));
+    let known = TRACKER_HOSTS
+        .iter()
+        .any(|h| host == *h || host.ends_with(&format!(".{h}")))
+        || TRACKER_PATHS.iter().any(|p| path.contains(p));
+    (small || hidden || known).then(|| tracker_name(host))
+}
+
+/// Quita del HTML las imágenes remotas que solo sirven para saber si se ha abierto
+/// el correo. Devuelve el HTML limpio y los dominios que las servían.
+pub fn strip_trackers(html: &str) -> (String, Vec<String>) {
+    let lower = html.to_ascii_lowercase();
+    let mut out = String::with_capacity(html.len());
+    let mut found: Vec<String> = Vec::new();
+    let mut last = 0;
+    let mut from = 0;
+    while let Some(i) = lower[from..].find("<img") {
+        let start = from + i;
+        let end = lower[start..].find('>').map(|e| start + e + 1).unwrap_or(lower.len());
+        from = end;
+        let after = lower[start + 4..].chars().next().unwrap_or(' ');
+        if !(after.is_whitespace() || after == '/' || after == '>') {
+            continue;
+        }
+        if let Some(name) = tracker_of(&html[start..end]) {
+            out.push_str(&html[last..start]);
+            last = end;
+            if !found.contains(&name) {
+                found.push(name);
+            }
+        }
+    }
+    out.push_str(&html[last..]);
+    (out, found)
 }
 
 pub struct CleanHtml {
@@ -289,6 +437,31 @@ Content-Transfer-Encoding: base64\r
 JVBERi0xLjQK\r
 --MIX--\r
 ";
+
+    #[test]
+    fn strips_tracking_pixels() {
+        let html = r#"<p>Hola</p><IMG width="1" height="1" src="https://t.news.example/o/abc"><img src='https://ejemplo.es/logo.png' width=120>
+<img src="https://us5.list-manage.com/track/open.php?u=1" alt=""><img style="display: none" src="//px.otro.example/x">
+<img src="cid:logo"><img src="https://abc.mailtrack.io/trace/mail/1.png" width="2" height="2">"#;
+        let (clean, found) = strip_trackers(html);
+        assert_eq!(
+            found,
+            ["news.example", "list-manage.com", "otro.example", "mailtrack.io"]
+        );
+        assert!(clean.contains("logo.png") && clean.contains("cid:logo") && clean.contains("<p>Hola</p>"));
+        assert!(!clean.contains("list-manage") && !clean.contains("t.news") && !clean.contains("mailtrack"));
+        assert_eq!(tag_attr("<img data-src=\"x\" src=y>", "src"), Some("y"));
+        assert_eq!(strip_trackers("<imgx src=a>").0, "<imgx src=a>");
+    }
+
+    #[test]
+    fn guesses_newsletters_and_receipts() {
+        let news = "From: Boletín <news@lista.es>\r\nList-Unsubscribe: <mailto:baja@lista.es>\r\nSubject: Octubre\r\n\r\nHola\r\n";
+        assert_eq!(parse(news.as_bytes(), env()).kind, "news");
+        let shop = "From: Tienda <hola@tienda.es>\r\nSubject: Tu pedido 4815 ya va de camino\r\n\r\nHola\r\n";
+        assert_eq!(parse(shop.as_bytes(), env()).kind, "receipts");
+        assert_eq!(parse(MAIL.as_bytes(), env()).kind, "principal");
+    }
 
     #[test]
     fn parses_headers_bodies_and_attachments() {

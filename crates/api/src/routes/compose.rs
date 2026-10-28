@@ -33,7 +33,7 @@ fn uploads_dir(st: &AppState, user: Id) -> PathBuf {
     st.data_dir.join("users").join(user.to_base58()).join("uploads")
 }
 
-fn valid_email(e: &str) -> bool {
+pub(crate) fn valid_email(e: &str) -> bool {
     let e = e.trim();
     match e.split_once('@') {
         Some((local, domain)) => !local.is_empty() && domain.contains('.') && !e.contains(char::is_whitespace),
@@ -446,6 +446,8 @@ pub async fn send_mail(
     }
     if let Some((id, r)) = &replied {
         let _ = udb.set_answered(*id).await;
+        // Contestado: sale de «Responder luego».
+        let _ = udb.replied(*id).await;
         st.sync.store_flag(
             &[buzon_store::mail::ImapTarget {
                 account_id: r.account_id,

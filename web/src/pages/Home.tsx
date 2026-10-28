@@ -2,15 +2,16 @@ import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { useLocation, useNavigate, useSearchParams } from 'react-router'
-import { api, type From, type Me, type Role, type ThreadFilter } from '../lib/api'
-import { actionsFor, boxKey, parseBox, type Box, type MailAction } from '../lib/mail'
+import { api, type FlowChange, type From, type Me, type Role, type ThreadFilter, type View } from '../lib/api'
+import { actionsFor, boxKey, parseBox, snoozeOptions, type Box, type MailAction } from '../lib/mail'
 import { useLiveUpdates } from '../lib/live'
 import { useSetMe } from '../lib/session'
 import { Sidebar } from '../components/mail/Sidebar'
 import { ThreadList, useThreadPages } from '../components/mail/ThreadList'
 import { Reader, REPLY_EVENT, type ReplyKind } from '../components/mail/Reader'
 import { Icon } from '../components/mail/Icons'
-import { LabelMenu, MoveMenu } from '../components/mail/Menus'
+import { LabelMenu, MoveMenu, SnoozeMenu } from '../components/mail/Menus'
+import { Screener } from '../components/mail/Screener'
 import { useMailActions, type MoveTarget } from '../components/mail/useMailActions'
 import { Shortcuts } from '../components/mail/Shortcuts'
 import { DraftList } from '../components/compose/DraftList'
@@ -18,6 +19,19 @@ import { ComposerProvider, useCompose } from '../components/compose/ComposerProv
 import { emptyCompose, pickIdentity } from '../lib/compose'
 
 const ACTION_ICONS: Record<MailAction, string> = { archive: 'archive', inbox: 'inbox', trash: 'trash', junk: 'junk', delete: 'trash' }
+
+/** Vistas del modo Enfoque que son parte de la entrada (el resto son pilas). */
+const INBOX_VIEWS: View[] = ['principal', 'news', 'receipts', 'screener', 'blocked', 'bubbled']
+
+/** Si un cambio en las pilas saca los hilos de la vista que se está viendo. */
+function leaves(view: View | undefined, c: FlowChange): boolean {
+  if (!view) return false
+  const parked = !!(c.reply_later || c.aside || c.snooze_until)
+  if (INBOX_VIEWS.includes(view)) return parked
+  if (view === 'reply_later') return c.reply_later === false || !!c.snooze_until
+  if (view === 'aside') return c.aside === false || !!c.snooze_until
+  return view === 'snoozed' && c.snooze_until === 0
+}
 
 /**
  * El correo: barra lateral, lista de hilos y lector. Lo que se ve va en la URL
@@ -52,32 +66,39 @@ function Mail({ me }: { me: Me }) {
 
   const unified = me.preferences.view === 'unified' && list.length > 1
   const account = unified ? undefined : (list.find((a) => a.id === params.get('a')) ?? list[0])?.id
-  const box = parseBox(params.get('b'))
+  const focus = me.preferences.mode === 'focus'
+  // En Enfoque se empieza en Principal; la entrada completa sigue en «Más carpetas».
+  const box: Box = focus && !params.get('b') ? { view: 'principal' } : parseBox(params.get('b'))
+  const view = 'view' in box ? box.view : undefined
   const search = params.get('q') ?? ''
   const thread = params.get('t')
   const filter: ThreadFilter = search
     ? { q: search, account }
-    : 'role' in box ? { role: box.role, account } : 'mailbox' in box ? { mailbox: box.mailbox } : { label: box.label, account }
-  const focus = me.preferences.mode === 'focus'
+    : 'role' in box ? { role: box.role, account }
+      : 'mailbox' in box ? { mailbox: box.mailbox }
+        : 'label' in box ? { label: box.label, account } : { view: box.view, account }
+  const home: Box = focus ? { view: 'principal' } : { role: 'inbox' }
 
   const folder = 'mailbox' in box ? boxes.find((m) => m.id === box.mailbox) : undefined
   const label = 'label' in box ? labels.data?.find((l) => l.id === box.label) : undefined
   const title = search
     ? t('search.title', { q: search })
-    : folder?.name ?? label?.name ?? ('role' in box
-      ? t(`mail.roles.${focus && box.role === 'inbox' ? 'principal' : box.role}`)
-      : t('mail.roles.inbox'))
+    : folder?.name ?? label?.name ?? ('role' in box ? t(`mail.roles.${box.role}`)
+      : view ? t(`flow.views.${view}`) : t('mail.roles.inbox'))
 
-  // Desde dónde se mueve: la carpeta que se ve. En una etiqueta o una búsqueda, de donde estén.
-  const role: Role | null | undefined = search ? undefined : 'role' in box ? box.role : folder?.role
-  const from: From = search ? {} : 'role' in box ? { from_role: box.role } : 'mailbox' in box ? { from_mailbox: box.mailbox } : {}
+  // Desde dónde se mueve: la carpeta que se ve. En una etiqueta, una pila o una búsqueda, de donde estén.
+  const inboxView = !!view && INBOX_VIEWS.includes(view)
+  const role: Role | null | undefined = search ? undefined : 'role' in box ? box.role : inboxView ? 'inbox' : folder?.role
+  const from: From = search ? {}
+    : 'role' in box ? { from_role: box.role }
+      : 'mailbox' in box ? { from_mailbox: box.mailbox } : inboxView ? { from_role: 'inbox' } : {}
   const actions = actionsFor(role)
   const mail = useMailActions(from)
 
   // La selección vale para lo que se ve: se vacía al cambiar de carpeta o de búsqueda.
   const [checked, setChecked] = useState<ReadonlySet<string>>(new Set())
-  const view = JSON.stringify(filter)
-  useEffect(() => setChecked(new Set()), [view])
+  const viewKey = JSON.stringify(filter)
+  useEffect(() => setChecked(new Set()), [viewKey])
   const check = (ids: string[], on: boolean) =>
     setChecked((c) => (on ? new Set([...c, ...ids]) : new Set([...c].filter((x) => !ids.includes(x)))))
 
@@ -113,12 +134,12 @@ function Mail({ me }: { me: Me }) {
   }
 
   async function chooseAccount(id: string | null) {
-    const view = id ? 'per_account' : 'unified'
-    go({ a: id, b: { role: 'inbox' } })
+    const pref = id ? 'per_account' : 'unified'
+    go({ a: id, b: home })
     setDrawer(false)
-    if (view !== me.preferences.view) {
-      setMe({ ...me, preferences: { ...me.preferences, view } })
-      setMe(await api.updatePreferences({ view }).catch(() => me))
+    if (pref !== me.preferences.view) {
+      setMe({ ...me, preferences: { ...me.preferences, view: pref } })
+      setMe(await api.updatePreferences({ view: pref }).catch(() => me))
     }
   }
 
@@ -161,6 +182,24 @@ function Mail({ me }: { me: Me }) {
     mail.move(target, ids, { onUndo: () => open && ids.includes(open) && go({ t: open }) })
     afterMove(ids)
     check(ids, false)
+  }
+
+  function flowIds(change: FlowChange, ids: string[]) {
+    const out = leaves(view, change)
+    const open = thread
+    mail.flow(ids, change, { leaves: out, onUndo: () => out && open && ids.includes(open) && go({ t: open }) })
+    if (out) {
+      afterMove(ids)
+      check(ids, false)
+    }
+  }
+
+  /** «Responder en bloque»: abre el primero de la pila y empieza la respuesta. */
+  function replyInBlock() {
+    const first = visible[0]
+    if (!first) return
+    go({ t: first.id })
+    setTimeout(() => window.dispatchEvent(new CustomEvent<ReplyKind>(REPLY_EVENT, { detail: 'reply' })), 600)
   }
 
   /** A lo que se aplican los atajos: la selección o, si no hay, el hilo abierto. */
@@ -213,6 +252,21 @@ function Mail({ me }: { me: Me }) {
       case 'x':
         if (thread) check([thread], !checked.has(thread))
         break
+      case 'l': {
+        const on = visible.filter((x) => ids.includes(x.id)).every((x) => x.reply_later)
+        flowIds({ reply_later: !on }, ids)
+        break
+      }
+      case 'p': {
+        const on = visible.filter((x) => ids.includes(x.id)).every((x) => x.aside)
+        flowIds({ aside: !on }, ids)
+        break
+      }
+      case 'b': {
+        const tomorrow = snoozeOptions().find((o) => o.key === 'tomorrow')!
+        flowIds({ snooze_until: Math.floor(tomorrow.at.getTime() / 1000) }, ids)
+        break
+      }
       case 'r': case 'a': case 'f':
         if (thread) window.dispatchEvent(new CustomEvent<ReplyKind>(REPLY_EVENT, { detail: k === 'r' ? 'reply' : k === 'a' ? 'all' : 'forward' }))
         break
@@ -225,7 +279,7 @@ function Mail({ me }: { me: Me }) {
       case '?':
         setHelp(!help)
         break
-      case 'gi': go({ b: { role: 'inbox' } }); break
+      case 'gi': go({ b: home }); break
       case 'gs': go({ b: { role: 'sent' } }); break
       case 'gd': go({ b: { role: 'drafts' } }); break
       case 'ga': go({ b: { role: 'archive' } }); break
@@ -260,7 +314,7 @@ function Mail({ me }: { me: Me }) {
       }
       // Enter y flechas solo cuando nada tiene el foco, para no robar el de los botones.
       if ((k === 'Enter' || k.startsWith('Arrow')) && el && el !== document.body) return
-      if (!/^([jkoue#!sIUxrafc/?]|Escape|Enter|ArrowUp|ArrowDown)$/.test(k)) return
+      if (!/^([jkoue#!sIUxrafclpb/?]|Escape|Enter|ArrowUp|ArrowDown)$/.test(k)) return
       e.preventDefault()
       keyRef.current(k)
     }
@@ -283,6 +337,8 @@ function Mail({ me }: { me: Me }) {
   const allStarred = picked.length > 0 && picked.every((x) => x.flagged)
   const common = picked.length ? picked[0].labels.filter((l) => picked.every((x) => x.labels.includes(l))) : []
   const accountsPicked = new Set(picked.map((x) => x.account_id))
+  const allLater = picked.length > 0 && picked.every((x) => x.reply_later)
+  const allAside = picked.length > 0 && picked.every((x) => x.aside)
   const toolbar = (
     <>
       {actions.map((a) => (
@@ -299,6 +355,17 @@ function Mail({ me }: { me: Me }) {
         <Icon name="star" filled={allStarred} className={allStarred ? 'text-warn' : ''} />
         <span className="sr-only">{allStarred ? t('actions.unstar') : t('actions.star')}</span>
       </button>
+      <button className="btn btn-ghost px-2.5" title={allLater ? t('flow.unReplyLater') : t('flow.replyLater')}
+        onClick={() => flowIds({ reply_later: !allLater }, ids)}>
+        <Icon name="later" className={allLater ? 'text-accent' : ''} />
+        <span className="sr-only">{allLater ? t('flow.unReplyLater') : t('flow.replyLater')}</span>
+      </button>
+      <button className="btn btn-ghost px-2.5" title={allAside ? t('flow.unAside') : t('flow.aside')}
+        onClick={() => flowIds({ aside: !allAside }, ids)}>
+        <Icon name="pin" className={allAside ? 'text-accent' : ''} />
+        <span className="sr-only">{allAside ? t('flow.unAside') : t('flow.aside')}</span>
+      </button>
+      <SnoozeMenu snoozed={picked.some((x) => x.snooze_until !== null)} onSnooze={(until) => flowIds({ snooze_until: until }, ids)} compact />
       <LabelMenu current={common} onChange={(add, remove) => mail.label(ids, add, remove)} compact />
       {accountsPicked.size === 1 && (
         <MoveMenu mailboxes={boxes} account={[...accountsPicked][0]} compact
@@ -318,17 +385,28 @@ function Mail({ me }: { me: Me }) {
         </div>
       )}
       <section className={`${thread ? 'hidden md:flex' : 'flex'} min-h-0 w-full shrink-0 flex-col border-r border-line bg-surface md:w-[22rem] lg:w-[26rem]`}>
-        <ThreadList title={title} filter={filter} accounts={list} selected={thread} grouped={focus && !search}
-          showAccount={unified} onSelect={(id) => go({ t: id })} onMenu={() => setDrawer(true)}
-          onCompose={list.length ? newMessage : undefined}
-          hidden={mail.hidden} checked={checked} onCheck={check} toolbar={toolbar}
-          search={search} onSearch={(q) => go({ q, t: null })}
-          before={!search && 'role' in box && box.role === 'drafts' && drafts.data?.length ? <DraftList drafts={drafts.data} /> : null} />
+        {view === 'screener' && !search ? (
+          <Screener selected={thread} onOpen={(id) => go({ t: id })} onMenu={() => setDrawer(true)}
+            onBlocked={() => go({ b: { view: 'blocked' } })} />
+        ) : (
+          <ThreadList title={title} filter={filter} accounts={list} selected={thread} grouped={focus && !search && !view?.startsWith('reply')}
+            showAccount={unified} onSelect={(id) => go({ t: id })} onMenu={() => setDrawer(true)}
+            onCompose={list.length ? newMessage : undefined}
+            hidden={mail.hidden} checked={checked} onCheck={check} toolbar={toolbar}
+            search={search} onSearch={(q) => go({ q, t: null })}
+            pinned={view === 'principal' && !search ? { title: t('flow.views.bubbled'), filter: { view: 'bubbled', account } } : undefined}
+            emptyText={view && !inboxView && !search ? <b className="block text-fg">{t('flow.emptyPile')}</b> : undefined}
+            actions={view === 'reply_later' && visible.length > 0 && !search ? (
+              <button className="btn px-3 text-sm" onClick={replyInBlock}><Icon name="reply" /> <span className="max-sm:sr-only">{t('flow.replyAllInBlock')}</span></button>
+            ) : undefined}
+            before={!search && 'role' in box && box.role === 'drafts' && drafts.data?.length ? <DraftList drafts={drafts.data} /> : null} />
+        )}
       </section>
       <main className={`${thread ? 'flex' : 'hidden md:flex'} min-h-0 min-w-0 flex-1 flex-col overflow-y-auto`}>
         <Reader id={thread} font={me.preferences.font} onBack={back} actions={actions} mailboxes={boxes}
           onMove={(target) => thread && moveIds(target, [thread])}
-          onLabel={(add, remove) => thread && mail.label([thread], add, remove)} />
+          onLabel={(add, remove) => thread && mail.label([thread], add, remove)}
+          onFlow={(change) => thread && flowIds(change, [thread])} focus={focus} />
       </main>
       <button className="fixed bottom-4 right-4 z-10 hidden size-9 place-items-center rounded-full border border-line bg-surface text-muted shadow hover:text-fg lg:grid"
         title={t('shortcuts.open')} aria-label={t('shortcuts.open')} onClick={() => setHelp(true)}>

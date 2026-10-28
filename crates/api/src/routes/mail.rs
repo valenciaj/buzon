@@ -9,6 +9,7 @@ use axum::http::{header, HeaderName, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
+use buzon_store::flow::View;
 use buzon_store::mail::{decode_mailbox_name, ThreadQuery};
 use buzon_store::organize::parse_search;
 use buzon_store::user::user_raw_dir;
@@ -79,6 +80,9 @@ pub struct ThreadParams {
     /// `en:` (entrada, enviados, archivo…) `tiene:adjunto` `es:noleido` `es:destacado`
     /// `despues:AAAA-MM-DD` y `antes:AAAA-MM-DD` (también en inglés: `from:`, `in:`…).
     pub q: Option<String>,
+    /// Bandeja o pila del modo Enfoque: `principal`, `news`, `receipts`, `screener`
+    /// (por aprobar), `blocked`, `reply_later`, `aside`, `snoozed` o `bubbled` (reaparecidos).
+    pub view: Option<String>,
 }
 
 fn parse_cursor(c: &str) -> ApiResult<(i64, Id)> {
@@ -100,6 +104,10 @@ pub async fn threads(
             return Err(ApiError::bad_request("Ese tipo de carpeta no existe."));
         }
     }
+    let view = match p.view.as_deref() {
+        Some(v) => Some(View::parse(v).ok_or_else(|| ApiError::bad_request("Esa bandeja no existe."))?),
+        None => None,
+    };
     let limit = p.limit.unwrap_or(50).clamp(1, 100);
     let udb = st.user_db(cu.user.id).await?;
     let search = p.q.as_deref().map(parse_search).filter(|s| !s.is_empty());
@@ -124,6 +132,8 @@ pub async fn threads(
         limit,
         label,
         search,
+        view,
+        now: buzon_store::now(),
     };
     let threads = udb.threads(&q).await?;
     let next_cursor = (threads.len() == limit as usize)
@@ -165,6 +175,7 @@ pub async fn thread(
             text: m.text,
             html: m.html,
             remote_images: m.remote_images,
+            trackers: m.trackers,
             attachments: m
                 .attachments
                 .into_iter()
@@ -181,10 +192,15 @@ pub async fn thread(
         .collect();
     Ok(Json(ThreadDetail {
         labels: udb.thread_labels(t.id).await?,
+        sender: udb.thread_sender(t.id).await?.map(Into::into),
         id: t.id,
         account_id: t.account_id,
         subject: t.subject,
         messages,
+        note: t.note,
+        reply_later: t.flow.reply_later,
+        aside: t.flow.aside,
+        snooze_until: t.flow.snooze_until,
     }))
 }
 

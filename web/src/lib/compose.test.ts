@@ -5,7 +5,7 @@ import {
 } from './compose'
 
 const msg = (over: Partial<Message> = {}): Message => ({
-  id: 'm', mailbox_id: 'b', subject: 'Cena', from: { name: 'Ana', email: 'ana@x.es' },
+  id: 'm', mailbox_id: 'b', trackers: [], subject: 'Cena', from: { name: 'Ana', email: 'ana@x.es' },
   to: [{ name: null, email: 'yo@x.es' }, { name: 'Luis', email: 'luis@x.es' }], cc: [{ name: null, email: 'eva@x.es' }],
   date: 0, seen: true, flagged: false, answered: false, text: 'Hola\n\n¿Vienes?', html: null, remote_images: 0, attachments: [],
   ...over,

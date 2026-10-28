@@ -930,6 +930,14 @@ impl UserDb {
             .bind(t)
             .execute(&self.pool)
             .await?;
+            // Escribir a alguien que esperaba en «Por aprobar» lo aprueba.
+            sqlx::query(
+                "UPDATE senders SET status = 'approved', decided_at = ? WHERE email = ? AND status = 'pending'",
+            )
+            .bind(t)
+            .bind(a.email.trim())
+            .execute(&self.pool)
+            .await?;
         }
         Ok(())
     }
@@ -975,11 +983,11 @@ impl UserDb {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::mail::{Flags, NewMessage, ThreadQuery};
 
-    async fn db() -> (tempfile::TempDir, UserDb, Id) {
+    pub(crate) async fn db() -> (tempfile::TempDir, UserDb, Id) {
         let dir = tempfile::tempdir().unwrap();
         let db = UserDb::open(dir.path(), Id::new()).await.unwrap();
         let key = crate::crypto::MasterKey::generate().derive("x");
@@ -1004,7 +1012,15 @@ mod tests {
         (dir, db, acc.id)
     }
 
-    fn msg(account: Id, mailbox: Id, uid: u32, mid: &str, subject: &str, from: &str, text: &str) -> NewMessage {
+    pub(crate) fn msg(
+        account: Id,
+        mailbox: Id,
+        uid: u32,
+        mid: &str,
+        subject: &str,
+        from: &str,
+        text: &str,
+    ) -> NewMessage {
         NewMessage {
             id: Id::new(),
             account_id: account,
@@ -1031,6 +1047,8 @@ mod tests {
             html: None,
             remote_images: 0,
             attachments: vec![],
+            kind: "principal".into(),
+            trackers: vec![],
         }
     }
 
