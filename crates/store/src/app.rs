@@ -73,7 +73,7 @@ pub struct Invitation {
     pub used_at: Option<i64>,
 }
 
-fn user_from_row(r: &SqliteRow) -> Result<User> {
+pub(crate) fn user_from_row(r: &SqliteRow) -> Result<User> {
     Ok(User {
         id: Id::from_slice(r.try_get::<&[u8], _>("id")?)?,
         username: r.try_get("username")?,
@@ -104,13 +104,13 @@ fn invitation_from_row(r: &SqliteRow) -> Result<Invitation> {
     })
 }
 
-const USER_COLS: &str = "id, username, email, password_hash, role, totp_secret, totp_enabled, \
+pub(crate) const USER_COLS: &str = "id, username, email, password_hash, role, totp_secret, totp_enabled, \
                          failed_logins, locked_until, language, created_at";
 
 /// Base de datos global de la aplicación.
 #[derive(Clone)]
 pub struct AppDb {
-    pool: SqlitePool,
+    pub(crate) pool: SqlitePool,
 }
 
 impl AppDb {
@@ -387,16 +387,16 @@ impl AppDb {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    async fn db() -> (tempfile::TempDir, AppDb) {
+    pub(crate) async fn db() -> (tempfile::TempDir, AppDb) {
         let dir = tempfile::tempdir().unwrap();
         let db = AppDb::open(&dir.path().join("app.db")).await.unwrap();
         (dir, db)
     }
 
-    fn new_user(name: &str) -> NewUser<'_> {
+    pub(crate) fn new_user(name: &str) -> NewUser<'_> {
         NewUser {
             username: name,
             email: None,

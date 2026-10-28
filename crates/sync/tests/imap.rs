@@ -9,7 +9,7 @@ use buzon_store::mail::ThreadQuery;
 use buzon_store::organize::{Place, Rule};
 use buzon_store::user::{user_raw_dir, NewAccount};
 use buzon_store::{Id, UserDb};
-use buzon_sync::{Security, ServerConfig, State, SyncHub};
+use buzon_sync::{HookEvent, Security, ServerConfig, State, SyncHub};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Notify;
@@ -386,6 +386,7 @@ async fn syncs_threads_flags_and_new_mail_with_idle() {
     buzon_sync::check(&cfg).await.unwrap();
 
     let hub = SyncHub::new(dir.path().to_path_buf(), true);
+    let mut hooks = hub.subscribe_hooks();
     hub.start(user, db.clone(), &account, "clave".into());
     wait_for("primera sincronización", || hub.state(account.id) == State::Idle).await;
 
@@ -464,6 +465,16 @@ async fn syncs_threads_flags_and_new_mail_with_idle() {
     // Lo de la primera descarga queda aprobado; el remitente nuevo, por aprobar.
     assert_eq!(db.sender("ana@ejemplo.es").await.unwrap().unwrap().status, "approved");
     assert_eq!(db.sender("luis@ejemplo.es").await.unwrap().unwrap().status, "pending");
+    // Los webhooks se enteran del correo nuevo, no de la primera descarga.
+    match hooks.try_recv().expect("aviso para webhooks") {
+        HookEvent::Received { user: u, message, .. } => {
+            assert_eq!(u, user);
+            let m = db.message_brief(message).await.unwrap().unwrap();
+            assert_eq!((m.subject.as_str(), m.mailbox.as_str()), ("Hola", "INBOX"));
+            assert_eq!(m.from.unwrap().email, "luis@ejemplo.es");
+        }
+        other => panic!("{other:?}"),
+    }
     let screener = ThreadQuery {
         view: Some(buzon_store::flow::View::Screener),
         limit: 10,

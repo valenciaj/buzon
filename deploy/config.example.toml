@@ -21,3 +21,7 @@ cookie_secure = true
 
 # Cuentas IMAP/SMTP sin cifrar. Déjalo en false: solo sirve para pruebas locales.
 allow_insecure_mail = false
+
+# Webhooks a direcciones de la red local (192.168.x.x, localhost…) o sin HTTPS.
+# Actívalo solo si confías en todos los usuarios: permite llamar a servicios internos.
+allow_private_webhooks = false

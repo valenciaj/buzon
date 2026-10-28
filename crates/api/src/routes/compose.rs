@@ -406,6 +406,14 @@ pub async fn send_mail(
         .filter(|h| !h.is_empty())
         .map(|h| buzon_sync::parse::sanitize_html(h, &HashMap::new()).html);
     let recipients: Vec<Addr> = to.iter().chain(&cc).chain(&bcc).cloned().collect();
+    let hook = serde_json::json!({
+        "account": account.id,
+        "from": identity.email,
+        "to": to,
+        "cc": cc,
+        "subject": m.subject,
+        "in_reply_to": replied.as_ref().map(|(id, _)| *id),
+    });
     let outgoing = Outgoing {
         from: Addr {
             name: Some(identity.name.clone()).filter(|n| !n.is_empty()),
@@ -466,6 +474,9 @@ pub async fn send_mail(
     let _ = remove_uploads(&st, user, &udb, &m.attachments).await;
     st.sync.emit(user, account.id);
     let _ = st.db.audit(Some(user), "mail.sent", None).await;
+    let mut hook = hook;
+    hook["message_id"] = serde_json::json!(message_id);
+    st.emit_hook(user, "message.sent", hook).await;
     Ok(Json(SendResult { message_id }))
 }
 

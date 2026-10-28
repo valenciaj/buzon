@@ -137,6 +137,22 @@ pub struct StoredMessage {
     pub trackers: Vec<String>,
 }
 
+/// Resumen de un mensaje para los webhooks.
+#[derive(Debug, Clone, Serialize)]
+pub struct MessageBrief {
+    pub id: Id,
+    pub thread: Id,
+    pub account: Id,
+    pub mailbox: String,
+    pub subject: String,
+    pub from: Option<Addr>,
+    pub to: Vec<Addr>,
+    pub date: i64,
+    pub snippet: String,
+    /// `principal`, `news` o `receipts`.
+    pub kind: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct Thread {
     pub id: Id,
@@ -729,6 +745,32 @@ impl UserDb {
     /// Marca un hilo como leído o no leído (`seen`) o destacado (`flagged`).
     /// Devuelve los mensajes que han cambiado, para aplicarlo también en IMAP.
     /// Al destacar solo se marca el último mensaje; al quitarlo, todos.
+    pub async fn message_brief(&self, id: Id) -> Result<Option<MessageBrief>> {
+        let row = sqlx::query(
+            "SELECT m.thread_id, m.account_id, mb.name, m.subject, m.from_name, m.from_addr, m.to_json, \
+             m.date, m.snippet, m.kind FROM messages m JOIN mailboxes mb ON mb.id = m.mailbox_id WHERE m.id = ?",
+        )
+        .bind(id.as_bytes().as_slice())
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(r) = row else { return Ok(None) };
+        Ok(Some(MessageBrief {
+            id,
+            thread: Id::from_slice(r.try_get::<&[u8], _>("thread_id")?)?,
+            account: Id::from_slice(r.try_get::<&[u8], _>("account_id")?)?,
+            mailbox: r.try_get("name")?,
+            subject: r.try_get("subject")?,
+            from: r.try_get::<Option<String>, _>("from_addr")?.map(|email| Addr {
+                name: r.try_get("from_name").ok().flatten(),
+                email,
+            }),
+            to: serde_json::from_str(r.try_get("to_json")?).unwrap_or_default(),
+            date: r.try_get("date")?,
+            snippet: r.try_get("snippet")?,
+            kind: r.try_get("kind")?,
+        }))
+    }
+
     pub async fn update_thread(&self, id: Id, seen: Option<bool>, flagged: Option<bool>) -> Result<ThreadChanges> {
         let mut tx = self.pool.begin().await?;
         let mut changes = ThreadChanges::default();

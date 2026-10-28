@@ -231,6 +231,10 @@ pub async fn update_thread(
     if !changes.seen.is_empty() || !changes.flagged.is_empty() {
         st.sync.emit(cu.user.id, account);
     }
+    if let (Some(v), false) = (req.seen, changes.seen.is_empty()) {
+        let data = serde_json::json!({ "threads": [id], "seen": v });
+        st.emit_hook(cu.user.id, "message.read", data).await;
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 

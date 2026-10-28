@@ -16,6 +16,7 @@ use tower::ServiceExt;
 struct T {
     dir: tempfile::TempDir,
     app: Router,
+    state: Arc<AppState>,
 }
 
 async fn app() -> T {
@@ -33,8 +34,11 @@ async fn app_with(allow_insecure_mail: bool) -> T {
         Some("https://correo.test".into()),
     );
     state.allow_insecure_mail = allow_insecure_mail;
+    state.allow_private_webhooks = allow_insecure_mail;
+    let state = Arc::new(state);
     T {
-        app: buzon_api::app(Arc::new(state), None),
+        app: buzon_api::app(state.clone(), None),
+        state,
         dir,
     }
 }
@@ -50,8 +54,11 @@ struct Res {
 impl T {
     async fn call(&self, method: &str, uri: &str, cookie: Option<&str>, body: Option<Value>) -> Res {
         let mut b = Request::builder().method(method).uri(uri);
-        if let Some(c) = cookie {
-            b = b.header(header::COOKIE, c);
+        match cookie {
+            // Los tokens de la API van en la cabecera Authorization.
+            Some(c) if c.starts_with("bz_") => b = b.header(header::AUTHORIZATION, format!("Bearer {c}")),
+            Some(c) => b = b.header(header::COOKIE, c),
+            None => {}
         }
         let req = match body {
             Some(v) => b
@@ -1367,4 +1374,349 @@ async fn focus_flow_screener_piles_and_notes() {
         true
     );
     let _ = msg;
+}
+
+#[tokio::test]
+async fn api_tokens_have_scopes_and_can_be_revoked() {
+    let t = app().await;
+    let admin = t.setup().await;
+
+    for bad in [
+        json!({"name": "x", "scopes": []}),
+        json!({"name": "x", "scopes": ["root"]}),
+        json!({"name": "", "scopes": ["mail:read"]}),
+        json!({"name": "x", "scopes": ["mail:read"], "expires_days": 0}),
+    ] {
+        let r = t.call("POST", "/api/v1/tokens", Some(&admin), Some(bad)).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.body);
+    }
+    let r = t
+        .call(
+            "POST",
+            "/api/v1/tokens",
+            Some(&admin),
+            Some(json!({"name": "Script", "scopes": ["mail:read", "mail:read"], "expires_days": 30})),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    let token = r.body["token"].as_str().unwrap().to_string();
+    assert!(token.starts_with("bz_"));
+    assert!(token.starts_with(r.body["prefix"].as_str().unwrap()));
+    assert_eq!(r.body["scopes"], json!(["mail:read"]));
+    let id = r.body["id"].as_str().unwrap().to_string();
+
+    // Lee, pero no cambia nada ni entra en lo que es solo de la web.
+    assert_eq!(
+        t.call("GET", "/api/v1/threads", Some(&token), None).await.status,
+        StatusCode::OK
+    );
+    assert_eq!(
+        t.call("GET", "/api/v1/mailboxes", Some(&token), None).await.status,
+        StatusCode::OK
+    );
+    let r = t
+        .call(
+            "POST",
+            "/api/v1/threads/flags",
+            Some(&token),
+            Some(json!({"threads": [], "seen": true})),
+        )
+        .await;
+    assert_eq!(
+        (r.status, r.body["error"].as_str()),
+        (StatusCode::FORBIDDEN, Some("scope_required"))
+    );
+    for (m, uri) in [
+        ("GET", "/api/v1/me"),
+        ("GET", "/api/v1/tokens"),
+        ("GET", "/api/v1/invitations"),
+        ("POST", "/api/v1/auth/logout"),
+    ] {
+        let r = t.call(m, uri, Some(&token), None).await;
+        assert_eq!(
+            (r.status, r.body["error"].as_str()),
+            (StatusCode::FORBIDDEN, Some("session_required")),
+            "{uri}"
+        );
+    }
+    let r = t.call("GET", "/api/v1/threads", Some("bz_noexiste"), None).await;
+    assert_eq!(
+        (r.status, r.body["error"].as_str()),
+        (StatusCode::UNAUTHORIZED, Some("invalid_token"))
+    );
+
+    let list = t.call("GET", "/api/v1/tokens", Some(&admin), None).await.body;
+    assert_eq!(list.as_array().unwrap().len(), 1);
+    assert!(list[0]["last_used_at"].is_i64());
+    assert!(list[0].get("token").is_none(), "el token no se vuelve a mostrar");
+
+    assert_eq!(
+        t.call("DELETE", &format!("/api/v1/tokens/{id}"), Some(&admin), None)
+            .await
+            .status,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        t.call("GET", "/api/v1/threads", Some(&token), None).await.status,
+        StatusCode::UNAUTHORIZED
+    );
+
+    // Límite por minuto, por token.
+    let tok = Id::new();
+    for _ in 0..buzon_api::session::RATE_LIMIT {
+        assert!(t.state.rate_ok(tok, 120));
+    }
+    assert!(!t.state.rate_ok(tok, 150));
+    assert!(t.state.rate_ok(Id::new(), 150), "otro token tiene su propio límite");
+    assert!(t.state.rate_ok(tok, 180), "minuto nuevo");
+
+    // La especificación explica cómo autenticarse con token.
+    let spec = t.call("GET", "/api/openapi.json", None, None).await.body;
+    assert_eq!(spec["components"]["securitySchemes"]["token"]["scheme"], "bearer");
+}
+
+/// Servidor HTTP mínimo que apunta lo que le llega y responde con los códigos dados, en orden.
+async fn fake_hook(codes: Vec<u16>) -> (u16, tokio::sync::mpsc::UnboundedReceiver<Hit>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        let mut codes = codes.into_iter();
+        loop {
+            let (mut s, _) = listener.accept().await.unwrap();
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 4096];
+            let (head, body) = loop {
+                let n = s.read(&mut chunk).await.unwrap();
+                buf.extend_from_slice(&chunk[..n]);
+                let text = String::from_utf8_lossy(&buf).to_string();
+                if let Some((head, body)) = text.split_once("\r\n\r\n") {
+                    let len: usize = head
+                        .lines()
+                        .find_map(|l| {
+                            l.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(|v| v.trim().parse().unwrap())
+                        })
+                        .unwrap_or(0);
+                    if body.len() >= len || n == 0 {
+                        break (head.to_string(), body.to_string());
+                    }
+                }
+            };
+            let headers = head
+                .lines()
+                .skip(1)
+                .filter_map(|l| l.split_once(':'))
+                .map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_string()))
+                .collect();
+            let code = codes.next().unwrap_or(200);
+            let _ = s
+                .write_all(format!("HTTP/1.1 {code} X\r\ncontent-length: 0\r\nconnection: close\r\n\r\n").as_bytes())
+                .await;
+            let _ = tx.send((headers, body));
+        }
+    });
+    (port, rx)
+}
+
+type Hit = (Vec<(String, String)>, String);
+
+async fn wait(rx: &mut tokio::sync::mpsc::UnboundedReceiver<Hit>) -> Hit {
+    tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
+        .await
+        .expect("el webhook no llega")
+        .unwrap()
+}
+
+/// Historial de envíos, cuando ya no queda ninguno sin intentar.
+async fn deliveries(t: &T, admin: &str, hook: &str) -> Value {
+    let uri = format!("/api/v1/webhooks/{hook}/deliveries");
+    for _ in 0..50 {
+        let list = t.call("GET", &uri, Some(admin), None).await.body;
+        if list
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|d| d["attempts"].as_i64() > Some(0))
+        {
+            return list;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    panic!("el envío no termina");
+}
+
+#[tokio::test]
+async fn webhooks_are_signed_queued_and_redelivered() {
+    let t = app_with(true).await;
+    buzon_api::hooks::start(t.state.clone());
+    let admin = t.setup().await;
+    let (port, mut hits) = fake_hook(vec![500, 200, 200]).await;
+
+    let r = t
+        .call(
+            "POST",
+            "/api/v1/webhooks",
+            Some(&admin),
+            Some(json!({"url": "https://a.example/", "events": ["nada"]})),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    let r = t
+        .call(
+            "POST",
+            "/api/v1/webhooks",
+            Some(&admin),
+            Some(json!({"url": format!("http://127.0.0.1:{port}/hook"), "events": ["contact.screened"], "description": "n8n"})),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    let secret = r.body["secret"].as_str().unwrap().to_string();
+    assert!(secret.starts_with("whsec_"));
+    let hook = r.body["id"].as_str().unwrap().to_string();
+
+    // Un evento al que no está suscrito no sale.
+    let r = t
+        .call(
+            "POST",
+            "/api/v1/threads/labels",
+            Some(&admin),
+            Some(json!({"threads": [Id::new()], "add": []})),
+        )
+        .await;
+    assert!(r.status.is_success() || r.status == StatusCode::NOT_FOUND, "{}", r.body);
+
+    let r = t
+        .call(
+            "PUT",
+            "/api/v1/senders",
+            Some(&admin),
+            Some(json!({"email": "ana@ejemplo.es", "status": "approved", "bucket": "news"})),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+
+    let (headers, body) = wait(&mut hits).await;
+    let h = |k: &str| {
+        headers
+            .iter()
+            .find(|(n, _)| n == k)
+            .map(|(_, v)| v.clone())
+            .unwrap_or_default()
+    };
+    assert_eq!(h("buzon-event"), "contact.screened");
+    let sig = h("buzon-signature");
+    let (ts, v1) = sig.split_once(',').unwrap();
+    let ts: i64 = ts.strip_prefix("t=").unwrap().parse().unwrap();
+    assert_eq!(
+        v1.strip_prefix("v1=").unwrap(),
+        buzon_api::hooks::signature(secret.as_bytes(), ts, &body)
+    );
+    let payload: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(payload["event"], "contact.screened");
+    assert_eq!(payload["data"]["email"], "ana@ejemplo.es");
+    assert_eq!(payload["data"]["bucket"], "news");
+
+    // Respondió 500: queda pendiente de reintento.
+    let list = deliveries(&t, &admin, &hook).await;
+    assert_eq!(list.as_array().unwrap().len(), 1);
+    assert_eq!(
+        (list[0]["status"].as_str(), list[0]["response"].as_i64()),
+        (Some("pending"), Some(500))
+    );
+    assert!(list[0]["next_at"].as_i64().unwrap() > ts);
+    let failed = t.call("GET", "/api/v1/webhooks", Some(&admin), None).await.body;
+    assert_eq!(failed[0]["description"], "n8n");
+
+    // Reenviar: mismo contenido, envío nuevo.
+    let d = list[0]["id"].as_str().unwrap();
+    let r = t
+        .call(
+            "POST",
+            &format!("/api/v1/webhooks/deliveries/{d}/redeliver"),
+            Some(&admin),
+            None,
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    let (_, again) = wait(&mut hits).await;
+    assert_eq!(again, body);
+    // La prueba llega aunque no esté suscrito a `ping`.
+    assert_eq!(
+        t.call("POST", &format!("/api/v1/webhooks/{hook}/test"), Some(&admin), None)
+            .await
+            .status,
+        StatusCode::ACCEPTED
+    );
+    let (headers, _) = wait(&mut hits).await;
+    assert!(headers.iter().any(|(k, v)| k == "buzon-event" && v == "ping"));
+    let list = deliveries(&t, &admin, &hook).await;
+    let statuses: Vec<_> = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["status"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(statuses.iter().filter(|s| *s == "ok").count(), 2, "{list}");
+
+    // Pausado: no se pone nada en cola.
+    let r = t
+        .call(
+            "PUT",
+            &format!("/api/v1/webhooks/{hook}"),
+            Some(&admin),
+            Some(json!({"active": false})),
+        )
+        .await;
+    assert_eq!(r.body["active"], false);
+    t.call(
+        "PUT",
+        "/api/v1/senders",
+        Some(&admin),
+        Some(json!({"email": "luis@ejemplo.es", "status": "blocked"})),
+    )
+    .await;
+    assert_eq!(deliveries(&t, &admin, &hook).await.as_array().unwrap().len(), 3);
+
+    // Con token: hace falta el permiso `webhooks`.
+    let tok = |scopes: Value| {
+        t.call(
+            "POST",
+            "/api/v1/tokens",
+            Some(&admin),
+            Some(json!({"name": "x", "scopes": scopes})),
+        )
+    };
+    let reader = tok(json!(["mail:read"])).await.body["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        t.call("GET", "/api/v1/webhooks", Some(&reader), None).await.status,
+        StatusCode::FORBIDDEN
+    );
+    let hooks = tok(json!(["webhooks"])).await.body["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        t.call("GET", "/api/v1/webhooks", Some(&hooks), None).await.status,
+        StatusCode::OK
+    );
+
+    assert_eq!(
+        t.call("DELETE", &format!("/api/v1/webhooks/{hook}"), Some(&admin), None)
+            .await
+            .status,
+        StatusCode::NO_CONTENT
+    );
+    assert!(t
+        .call("GET", "/api/v1/webhooks", Some(&admin), None)
+        .await
+        .body
+        .as_array()
+        .unwrap()
+        .is_empty());
 }

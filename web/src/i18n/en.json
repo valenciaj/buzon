@@ -157,7 +157,8 @@
       "accounts": "Email accounts",
       "invitations": "Invitations",
       "identities": "Identities & signatures",
-      "labels": "Labels and filters"
+      "labels": "Labels and filters",
+      "api": "API"
     },
     "back": "Back to mail"
   },
@@ -513,6 +514,76 @@
       "unsnooze_other": "{{count}} no longer snoozed.",
       "approved": "{{name}} approved: their email goes to {{bucket}}.",
       "blocked": "{{name}} screened out."
+    }
+  },
+  "api": {
+    "intro": "Connect Buzón to scripts and other apps (n8n, Zapier, Home Assistant…).",
+    "docs": "Read the API documentation",
+    "copyNow": "Copy it now and keep it somewhere safe: it won't be shown again.",
+    "tokens": {
+      "title": "Personal tokens",
+      "body": "A token gives access to your mail without your password. Give it only the permissions it needs. Send it in the Authorization: Bearer header.",
+      "name": "Name",
+      "namePlaceholder": "What it's for (e.g. \"Invoices script\")",
+      "scopes": "Permissions",
+      "expiry": "Expires",
+      "never": "Never",
+      "days_one": "In {{count}} day",
+      "days_other": "In {{count}} days",
+      "create": "Create token",
+      "token": "Token",
+      "none": "You have no tokens.",
+      "used": "Used on {{date}}",
+      "unused": "Never used",
+      "expires": "expires on {{date}}",
+      "noExpiry": "never expires",
+      "revoke": "Revoke",
+      "revokeConfirm": "Revoke \"{{name}}\"? Anything using it will stop working right away."
+    },
+    "scopes": {
+      "mail_read": "read mail, folders and labels",
+      "mail_write": "move, mark, label and filter",
+      "mail_send": "write drafts and send",
+      "contacts": "read and change contacts",
+      "webhooks": "manage webhooks"
+    },
+    "hooks": {
+      "title": "Webhooks",
+      "body": "Buzón calls a URL whenever something happens. Each call is signed with a secret; failed calls are retried for almost 24 hours.",
+      "url": "URL",
+      "description": "Description",
+      "descriptionPlaceholder": "To remember what it is",
+      "events": "Events",
+      "create": "Create webhook",
+      "secret": "Signing secret",
+      "none": "You have no webhooks.",
+      "paused": "Paused",
+      "test": "Test",
+      "history": "History",
+      "pause": "Pause",
+      "resume": "Resume",
+      "delete": "Delete",
+      "deleteConfirm": "Delete this webhook and its history?",
+      "noDeliveries": "Nothing has been sent yet.",
+      "attempts_one": "{{count}} attempt",
+      "attempts_other": "{{count}} attempts",
+      "nextAt": "next attempt on {{date}}",
+      "payload": "Payload",
+      "redeliver": "Resend"
+    },
+    "events": {
+      "message_received": "mail arrives in the inbox",
+      "message_sent": "you send mail",
+      "message_read": "you mark a thread read or unread",
+      "message_moved": "you move threads (archive, trash, spam…)",
+      "thread_labeled": "you add or remove labels",
+      "contact_screened": "you approve or block a sender",
+      "account_sync_failed": "an account stops syncing"
+    },
+    "status": {
+      "ok": "Delivered",
+      "failed": "Failed",
+      "pending": "Pending"
     }
   }
 }

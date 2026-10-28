@@ -20,6 +20,7 @@ use utoipa::OpenApi;
 use utoipa_scalar::{Scalar, Servable};
 
 pub mod error;
+pub mod hooks;
 pub mod models;
 mod prefs;
 pub mod routes;
@@ -27,7 +28,7 @@ pub mod session;
 mod validate;
 
 use error::{ApiError, ApiResult};
-use routes::{accounts, auth, compose, flow, invitations, mail, me, organize, setup};
+use routes::{accounts, auth, compose, flow, invitations, mail, me, organize, setup, tokens, webhooks};
 
 pub struct AppState {
     pub db: AppDb,
@@ -41,7 +42,13 @@ pub struct AppState {
     pub sync: SyncHub,
     /// Permite cuentas de correo sin cifrar (solo para pruebas locales).
     pub allow_insecure_mail: bool,
+    /// Permite webhooks a la red local y sin HTTPS.
+    pub allow_private_webhooks: bool,
+    /// Despierta al repartidor de webhooks cuando hay envíos nuevos en la cola.
+    pub hooks_ready: tokio::sync::Notify,
     user_dbs: Mutex<HashMap<Id, UserDb>>,
+    /// Peticiones de cada token en el minuto en curso.
+    rate: Mutex<HashMap<Id, (i64, u32)>>,
 }
 
 impl AppState {
@@ -60,7 +67,10 @@ impl AppState {
             cookie_secure,
             public_url,
             allow_insecure_mail: false,
+            allow_private_webhooks: false,
+            hooks_ready: tokio::sync::Notify::new(),
             user_dbs: Mutex::new(HashMap::new()),
+            rate: Mutex::new(HashMap::new()),
         }
     }
 
@@ -108,6 +118,30 @@ impl AppState {
         self.master.derive(&format!("user:{user}"))
     }
 
+    /// Clave para cifrar los secretos de firma de los webhooks.
+    pub fn hooks_box(&self) -> SecretBox {
+        self.master.derive("app:webhooks")
+    }
+
+    /// Cuenta una petición del token. `false` si ya ha pasado del límite en este minuto.
+    pub fn rate_ok(&self, token: Id, now: i64) -> bool {
+        let minute = now / 60;
+        let mut rate = self.rate.lock().expect("mutex");
+        rate.retain(|_, (m, _)| *m == minute);
+        let (_, n) = rate.entry(token).or_insert((minute, 0));
+        *n += 1;
+        *n <= session::RATE_LIMIT
+    }
+
+    /// Avisa a los webhooks del usuario. Nunca falla: un webhook no debe romper nada.
+    pub async fn emit_hook(&self, user: Id, event: &str, data: serde_json::Value) {
+        match self.db.enqueue_event(user, event, &data.to_string(), None).await {
+            Ok(0) => {}
+            Ok(_) => self.hooks_ready.notify_one(),
+            Err(e) => tracing::warn!("webhook {event}: {e}"),
+        }
+    }
+
     pub fn totp_box(&self) -> SecretBox {
         self.master.derive("app:totp")
     }
@@ -136,9 +170,23 @@ impl AppState {
     info(
         title = "Buzón API",
         description = "API del webmail Buzón. La web usa esta misma API.\n\n\
-            Autenticación: cookie de sesión `buzon_session` (se obtiene con `/api/v1/auth/login`). \
-            Las peticiones que cambian datos deben enviar `Content-Type: application/json`.\n\n\
-            Los identificadores son UUIDv7 codificados en Base58.",
+            ## Autenticación\n\n\
+            - **Token personal** (para scripts y otras apps): créalo en Ajustes → API y envíalo como \
+            `Authorization: Bearer bz_…`. Cada token tiene permisos: `mail:read` (leer), `mail:write` \
+            (mover, marcar, etiquetar, filtros), `mail:send` (borradores y envío), `contacts` y `webhooks`. \
+            La cuenta, la seguridad, los tokens y las invitaciones solo se gestionan desde la web. \
+            Límite: 300 peticiones por minuto por token (responde 429).\n            - **Cookie de sesión** `buzon_session` (la usa la web; se obtiene con `/api/v1/auth/login`).\n\n\
+            Las peticiones que cambian datos deben enviar `Content-Type: application/json`. \
+            Los identificadores son UUIDv7 codificados en Base58.\n\n\
+            ## Webhooks\n\n\
+            Buzón hace `POST` con un JSON `{id, event, created_at, data}` y estas cabeceras: \
+            `Buzon-Event`, `Buzon-Delivery` (id del envío) y `Buzon-Signature: t=<segundos>,v1=<firma>`. \
+            La firma es HMAC-SHA256 en hexadecimal, con el secreto del webhook, de `<t>.<cuerpo>`. \
+            Comprueba la firma y rechaza un `t` de hace más de 5 minutos. \
+            Responde con un código 2xx en menos de 10 s; si no, se reintenta a los 1 min, 5 min, 30 min, \
+            2 h, 6 h y 15 h. El `id` del cuerpo es el mismo en los reintentos y reenvíos.\n\n\
+            Eventos: `message.received`, `message.sent`, `message.read`, `message.moved`, \
+            `thread.labeled`, `contact.screened`, `account.sync_failed` y `ping` (prueba).",
         license(name = "MIT")
     ),
     paths(
@@ -157,6 +205,9 @@ impl AppState {
         organize::rules, organize::create_rule, organize::update_rule, organize::delete_rule,
         organize::book, organize::create_entry, organize::update_entry, organize::delete_entry, organize::import_vcard,
         flow::counts, flow::senders, flow::decide, flow::set_flow, flow::set_note,
+        tokens::list, tokens::create, tokens::revoke,
+        webhooks::list, webhooks::create, webhooks::update, webhooks::remove, webhooks::test,
+        webhooks::deliveries, webhooks::redeliver,
         invitations::create, invitations::list, invitations::revoke, invitations::check, invitations::accept,
     ),
     tags(
@@ -168,10 +219,41 @@ impl AppState {
         (name = "compose", description = "Redactar y enviar: identidades, firmas, borradores y adjuntos"),
         (name = "organize", description = "Mover y borrar hilos, etiquetas, filtros automáticos y contactos"),
         (name = "flow", description = "Modo Enfoque: filtro de remitentes, Principal/Novedades/Recibos, pilas, pospuestos y notas"),
+        (name = "tokens", description = "Tokens personales de la API (solo desde la web)"),
+        (name = "webhooks", description = "Avisos firmados a otras apps. Ver la descripción general para comprobar la firma"),
         (name = "invitations", description = "Registro por invitación (caduca a las 72 h)"),
-    )
+    ),
+    modifiers(&BearerAuth)
 )]
 pub struct ApiDoc;
+
+struct BearerAuth;
+
+impl utoipa::Modify for BearerAuth {
+    fn modify(&self, api: &mut utoipa::openapi::OpenApi) {
+        use utoipa::openapi::security::{
+            ApiKey, ApiKeyValue, HttpAuthScheme, HttpBuilder, SecurityRequirement, SecurityScheme,
+        };
+        let c = api.components.get_or_insert_with(Default::default);
+        c.add_security_scheme(
+            "token",
+            SecurityScheme::Http(
+                HttpBuilder::new()
+                    .scheme(HttpAuthScheme::Bearer)
+                    .bearer_format("bz_…")
+                    .build(),
+            ),
+        );
+        c.add_security_scheme(
+            "session",
+            SecurityScheme::ApiKey(ApiKey::Cookie(ApiKeyValue::new("buzon_session"))),
+        );
+        api.security = Some(vec![
+            SecurityRequirement::new("token", Vec::<String>::new()),
+            SecurityRequirement::new("session", Vec::<String>::new()),
+        ]);
+    }
+}
 
 #[derive(serde::Serialize, utoipa::ToSchema)]
 pub struct Health {
@@ -266,6 +348,13 @@ pub fn api_router(state: Arc<AppState>) -> Router {
         )
         .route("/rules", get(organize::rules).post(organize::create_rule))
         .route("/rules/{id}", put(organize::update_rule).delete(organize::delete_rule))
+        .route("/tokens", get(tokens::list).post(tokens::create))
+        .route("/tokens/{id}", delete(tokens::revoke))
+        .route("/webhooks", get(webhooks::list).post(webhooks::create))
+        .route("/webhooks/{id}", put(webhooks::update).delete(webhooks::remove))
+        .route("/webhooks/{id}/test", post(webhooks::test))
+        .route("/webhooks/{id}/deliveries", get(webhooks::deliveries))
+        .route("/webhooks/deliveries/{id}/redeliver", post(webhooks::redeliver))
         .route("/invitations", get(invitations::list).post(invitations::create))
         .route("/invitations/{id}", delete(invitations::revoke))
         .route("/invite/{token}", get(invitations::check).post(invitations::accept))
