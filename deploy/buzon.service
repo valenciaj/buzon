@@ -1,0 +1,29 @@
+[Unit]
+Description=Buzón webmail
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=buzon
+Group=buzon
+ExecStart=/usr/local/bin/buzon --config /etc/buzon/config.toml
+Restart=on-failure
+RestartSec=3
+Environment=RUST_LOG=buzon=info,tower_http=warn
+
+# Endurecimiento
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/buzon
+ReadOnlyPaths=/etc/buzon
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

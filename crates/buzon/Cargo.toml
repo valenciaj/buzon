@@ -1,0 +1,17 @@
+[package]
+name = "buzon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+buzon-api.workspace = true
+buzon-store.workspace = true
+serde.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+axum.workspace = true
+tower-http.workspace = true

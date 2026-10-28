@@ -1,0 +1,6 @@
+# Configuración para desarrollo local (cargo run -p buzon -- --config deploy/config.dev.toml)
+listen = "127.0.0.1:8080"
+data_dir = "data"
+web_dir = "web/dist"
+public_url = "http://localhost:5173"
+cookie_secure = false
