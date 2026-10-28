@@ -4,3 +4,5 @@ data_dir = "data"
 web_dir = "web/dist"
 public_url = "http://localhost:5173"
 cookie_secure = false
+# Permite probar con un servidor de correo local sin TLS.
+allow_insecure_mail = true

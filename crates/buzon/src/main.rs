@@ -71,14 +71,21 @@ async fn main() -> anyhow::Result<()> {
     if web_dir.is_none() {
         tracing::warn!("no se encuentra el frontend compilado; solo se sirve la API");
     }
-    let state = Arc::new(AppState::new(
+    let mut state = AppState::new(
         db,
         cfg.data_dir.clone(),
         master,
         cfg.cookie_secure,
         cfg.public_url.clone(),
-    ));
-    let app = buzon_api::app(state, web_dir).layer(tower_http::trace::TraceLayer::new_for_http());
+    )
+    .with_sync();
+    state.allow_insecure_mail = cfg.allow_insecure_mail;
+    let state = Arc::new(state);
+    match state.start_all_accounts().await {
+        Ok(n) => tracing::info!("sincronizando {n} cuentas de correo"),
+        Err(e) => tracing::error!("no se pudo arrancar la sincronización: {}", e.message),
+    }
+    let app = buzon_api::app(state.clone(), web_dir).layer(tower_http::trace::TraceLayer::new_for_http());
 
     let listener = tokio::net::TcpListener::bind(&cfg.listen)
         .await

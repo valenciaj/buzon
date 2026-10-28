@@ -22,7 +22,10 @@
     "email": "Correo de contacto",
     "language": "Idioma"
   },
-  "languages": { "es": "Español", "en": "English" },
+  "languages": {
+    "es": "Español",
+    "en": "English"
+  },
   "setup": {
     "title": "Configura Buzón",
     "steps": {
@@ -53,23 +56,36 @@
     "account": {
       "heading": "Añade tu primera cuenta de correo",
       "body": "Son los datos de tu servidor de correo. La contraseña se guarda cifrada.",
-      "later": "La conexión con el servidor se comprobará cuando llegue la sincronización."
+      "later": "Al terminar, Buzón empezará a descargar tu correo. Si algo falla, lo verás en Ajustes › Cuentas de correo."
     },
     "finish": "Terminar y entrar"
   },
   "look": {
     "theme": "Tema",
-    "themes": { "system": "Como el sistema", "light": "Claro", "dark": "Oscuro" },
+    "themes": {
+      "system": "Como el sistema",
+      "light": "Claro",
+      "dark": "Oscuro"
+    },
     "mode": "Modo de trabajo",
-    "modes": { "focus": "Enfoque", "classic": "Clásico" },
+    "modes": {
+      "focus": "Enfoque",
+      "classic": "Clásico"
+    },
     "modeHint": "Enfoque filtra remitentes nuevos y separa Principal, Novedades y Recibos. Clásico muestra las carpetas de siempre. Cambiar no borra nada.",
     "view": "Vista de cuentas",
-    "views": { "unified": "Unificada", "per_account": "Por cuenta" },
+    "views": {
+      "unified": "Unificada",
+      "per_account": "Por cuenta"
+    },
     "font": "Fuente",
     "fontDefault": "por defecto, máxima legibilidad",
     "fontSize": "Tamaño del texto",
     "density": "Densidad",
-    "densities": { "comfortable": "Cómoda", "compact": "Compacta" },
+    "densities": {
+      "comfortable": "Cómoda",
+      "compact": "Compacta"
+    },
     "densityHint": "Compacta reduce márgenes, nunca el tamaño del texto.",
     "preview": "Al final somos ocho para el sábado. ¿Te encargas tú del vino? Il1 O0 rn m"
   },
@@ -84,7 +100,27 @@
     "login": "Usuario del correo",
     "password": "Contraseña del correo",
     "add": "Añadir cuenta",
-    "added": "Cuenta añadida."
+    "added": "Cuenta añadida.",
+    "imapSecurity": "Cifrado IMAP",
+    "smtpSecurity": "Cifrado SMTP",
+    "security": {
+      "tls": "TLS (recomendado)",
+      "starttls": "STARTTLS",
+      "none": "Sin cifrar (solo pruebas)"
+    },
+    "checking": "Comprobando con el servidor…",
+    "saveAnyway": "Guardar sin comprobar",
+    "delete": "Eliminar",
+    "deleteConfirm": "¿Eliminar «{{name}}» de Buzón? Se borra el correo guardado aquí, no el del servidor.",
+    "syncNow": "Sincronizar ahora",
+    "states": {
+      "off": "Parada",
+      "connecting": "Conectando…",
+      "syncing": "Sincronizando…",
+      "idle": "Al día",
+      "error": "Error"
+    },
+    "syncedAt": "Última sincronización: {{date}}"
   },
   "login": {
     "title": "Entra en Buzón",
@@ -104,25 +140,10 @@
     "totpLater": "Ahora no"
   },
   "home": {
-    "empty": "Aún no hay correo aquí",
-    "emptyBody": "La lectura y sincronización del correo llegan en la siguiente fase. Mientras, puedes ajustar Buzón a tu gusto.",
     "noAccounts": "No tienes cuentas de correo todavía.",
     "addAccount": "Añadir una cuenta",
     "accounts": "Cuentas",
     "all": "Todas",
-    "boxes": {
-      "principal": "Principal",
-      "novedades": "Novedades",
-      "recibos": "Recibos",
-      "later": "Responder luego",
-      "aside": "Apartados",
-      "screener": "Por aprobar",
-      "sent": "Enviados",
-      "inbox": "Entrada",
-      "drafts": "Borradores",
-      "archive": "Archivo",
-      "spam": "Spam"
-    },
     "settings": "Ajustes",
     "logout": "Cerrar sesión",
     "menu": "Menú"
@@ -160,8 +181,51 @@
     "created": "Enlace creado. Cópialo ahora: no se volverá a mostrar.",
     "list": "Enlaces creados",
     "none": "Todavía no has invitado a nadie.",
-    "status": { "pending": "Pendiente", "used": "Usada", "expired": "Caducada" },
+    "status": {
+      "pending": "Pendiente",
+      "used": "Usada",
+      "expired": "Caducada"
+    },
     "expires": "Caduca el {{date}}",
     "revoke": "Anular"
+  },
+  "mail": {
+    "roles": {
+      "principal": "Principal",
+      "inbox": "Entrada",
+      "sent": "Enviados",
+      "drafts": "Borradores",
+      "archive": "Archivo",
+      "junk": "Spam",
+      "trash": "Papelera"
+    },
+    "moreFolders": "Más carpetas",
+    "folders": "Carpetas",
+    "groups": {
+      "today": "Hoy",
+      "yesterday": "Ayer",
+      "week": "Esta semana",
+      "older": "Antes"
+    },
+    "syncing": "Sincronizando…",
+    "syncError": "No se puede sincronizar: {{name}}",
+    "downloading": "Descargando tu correo…",
+    "downloadingBody": "La primera vez tarda un poco. Los correos irán apareciendo aquí.",
+    "empty": "Nada por aquí",
+    "emptyBody": "No hay correos en esta carpeta.",
+    "noSubject": "(sin asunto)",
+    "unread": "No leído",
+    "pick": "Elige un correo",
+    "pickBody": "Lo verás aquí, sin rastreadores ni imágenes remotas hasta que tú quieras.",
+    "missing": "Este hilo ya no existe. Puede que se haya borrado en otro programa.",
+    "markUnread": "Marcar como no leído",
+    "flag": "Destacar",
+    "unflag": "Quitar destacado",
+    "to": "para",
+    "cc": "Copia:",
+    "attachments": "Adjuntos",
+    "imagesBlocked_one": "Hemos bloqueado 1 imagen remota para que el remitente no sepa si lo has abierto.",
+    "imagesBlocked_other": "Hemos bloqueado {{count}} imágenes remotas para que el remitente no sepa si lo has abierto.",
+    "showImages": "Mostrar imágenes"
   }
 }

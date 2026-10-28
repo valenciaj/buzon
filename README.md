@@ -11,6 +11,7 @@ Webmail autoalojado: backend en Rust, frontend en React y SQLite (una base de da
 | Carpeta | Qué contiene |
 | --- | --- |
 | `crates/store` | SQLite: `app.db` y una base de datos por usuario, ids UUIDv7/Base58, cifrado |
+| `crates/sync` | Sincronización IMAP (un worker por cuenta, IDLE), análisis MIME y saneado del HTML |
 | `crates/api` | API HTTP (`/api/v1`), OpenAPI y visor público en `/api/docs` |
 | `crates/buzon` | Binario del servidor y su configuración |
 | `web` | Frontend React + TypeScript (Vite, Tailwind), en español e inglés |

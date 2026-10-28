@@ -18,6 +18,8 @@ pub struct Config {
     pub public_url: Option<String>,
     /// Cookie de sesión solo por HTTPS.
     pub cookie_secure: bool,
+    /// Permite cuentas IMAP/SMTP sin cifrar. Solo para pruebas locales.
+    pub allow_insecure_mail: bool,
 }
 
 impl Default for Config {
@@ -29,6 +31,7 @@ impl Default for Config {
             master_key_file: None,
             public_url: None,
             cookie_secure: true,
+            allow_insecure_mail: false,
         }
     }
 }
@@ -62,5 +65,6 @@ mod tests {
         let c: Config = toml::from_str(text).unwrap();
         assert_eq!(c.listen, "127.0.0.1:8080");
         assert!(c.cookie_secure);
+        assert!(!c.allow_insecure_mail);
     }
 }
