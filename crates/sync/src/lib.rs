@@ -61,6 +61,15 @@ pub struct Event {
     pub account: Id,
 }
 
+/// Algo del correo que puede interesar a un webhook.
+#[derive(Debug, Clone)]
+pub enum HookEvent {
+    /// Llegó un mensaje nuevo a la bandeja de entrada (no cuenta la primera descarga).
+    Received { user: Id, account: Id, message: Id },
+    /// La cuenta dejó de sincronizar.
+    SyncFailed { user: Id, account: Id, error: String },
+}
+
 pub(crate) enum Cmd {
     SyncNow,
     Store {
@@ -89,6 +98,7 @@ pub(crate) enum Cmd {
 
 pub(crate) struct Shared {
     pub events: broadcast::Sender<Event>,
+    pub hooks: broadcast::Sender<HookEvent>,
     pub status: Mutex<HashMap<Id, State>>,
 }
 
@@ -126,6 +136,7 @@ impl SyncHub {
             workers: Mutex::new(HashMap::new()),
             shared: Arc::new(Shared {
                 events: broadcast::channel(256).0,
+                hooks: broadcast::channel(1024).0,
                 status: Mutex::new(HashMap::new()),
             }),
         }
@@ -258,6 +269,11 @@ impl SyncHub {
 
     pub fn subscribe(&self) -> broadcast::Receiver<Event> {
         self.shared.events.subscribe()
+    }
+
+    /// Avisos para los webhooks.
+    pub fn subscribe_hooks(&self) -> broadcast::Receiver<HookEvent> {
+        self.shared.hooks.subscribe()
     }
 
     /// Avisa a las demás pestañas del usuario de un cambio hecho desde la API.

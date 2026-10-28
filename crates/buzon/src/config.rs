@@ -20,6 +20,8 @@ pub struct Config {
     pub cookie_secure: bool,
     /// Permite cuentas IMAP/SMTP sin cifrar. Solo para pruebas locales.
     pub allow_insecure_mail: bool,
+    /// Permite webhooks a la red local (y sin HTTPS). Útil para n8n o Home Assistant en casa.
+    pub allow_private_webhooks: bool,
 }
 
 impl Default for Config {
@@ -32,6 +34,7 @@ impl Default for Config {
             public_url: None,
             cookie_secure: true,
             allow_insecure_mail: false,
+            allow_private_webhooks: false,
         }
     }
 }
@@ -66,5 +69,6 @@ mod tests {
         assert_eq!(c.listen, "127.0.0.1:8080");
         assert!(c.cookie_secure);
         assert!(!c.allow_insecure_mail);
+        assert!(!c.allow_private_webhooks);
     }
 }

@@ -16,7 +16,7 @@ use tokio::time::Instant;
 
 use crate::conn::{self, ServerConfig, Session};
 use crate::parse::{self, Envelope};
-use crate::{Cmd, Result, Shared, State};
+use crate::{Cmd, HookEvent, Result, Shared, State};
 
 /// Mensajes más recientes que se descargan la primera vez en cada carpeta.
 const INITIAL: usize = 300;
@@ -79,7 +79,16 @@ pub(crate) async fn run(ctx: Ctx, mut rx: mpsc::UnboundedReceiver<Cmd>) {
         };
         let msg = err.to_string();
         tracing::warn!("cuenta {} ({:?}): {msg}", ctx.account, ctx.cfg);
+        // Solo se avisa del primer fallo, no de cada reintento.
+        let was_ok = matches!(ctx.db.account(ctx.account).await, Ok(Some(a)) if a.sync_error.is_none());
         let _ = ctx.db.set_sync_result(ctx.account, Some(&msg)).await;
+        if was_ok {
+            let _ = ctx.shared.hooks.send(HookEvent::SyncFailed {
+                user: ctx.user,
+                account: ctx.account,
+                error: msg.clone(),
+            });
+        }
         ctx.state(State::Error);
         tokio::select! {
             _ = tokio::time::sleep(retry) => {}
@@ -585,6 +594,13 @@ async fn fetch_batch(
         if mb.role.as_deref() == Some("inbox") {
             if let Some(from) = &msg.from {
                 ctx.db.screen_sender(from, &msg.kind, rules.is_some()).await?;
+            }
+            if rules.is_some() {
+                let _ = ctx.shared.hooks.send(HookEvent::Received {
+                    user: ctx.user,
+                    account: ctx.account,
+                    message: msg.id,
+                });
             }
         }
         if let Some(rules) = rules {

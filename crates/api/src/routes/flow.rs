@@ -94,6 +94,8 @@ pub async fn decide(
         st.sync.emit(cu.user.id, a.id);
     }
     let _ = st.db.audit(Some(cu.user.id), "contact.screened", None).await;
+    let data = serde_json::json!({ "email": s.email, "name": s.name, "status": s.status, "bucket": s.bucket });
+    st.emit_hook(cu.user.id, "contact.screened", data).await;
     Ok(Json(s.into()))
 }
 

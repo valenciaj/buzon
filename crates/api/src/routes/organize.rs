@@ -77,12 +77,16 @@ pub async fn move_threads(
 ) -> ApiResult<Json<MoveResult>> {
     check_threads(&req.threads)?;
     let from = place(req.from_role, req.from_mailbox, &ROLES)?;
+    let target = serde_json::json!({ "threads": req.threads, "to_role": req.to_role, "to_mailbox": req.to_mailbox });
     let to = place(req.to_role, req.to_mailbox, &MOVE_ROLES)?
         .ok_or_else(|| ApiError::bad_request("Indica adónde mover (to_role o to_mailbox)."))?;
     let udb = st.user_db(cu.user.id).await?;
     let ops = udb.move_messages(&req.threads, &[], from.as_ref(), &to).await?;
     udb.clear_bubbled(&req.threads).await?;
     st.sync.move_messages(&ops);
+    if !ops.is_empty() {
+        st.emit_hook(cu.user.id, "message.moved", target).await;
+    }
     let mut accounts: Vec<Id> = ops.iter().map(|o| o.account_id).collect();
     accounts.dedup();
     for a in accounts {
@@ -135,6 +139,10 @@ pub async fn flag_threads(
         flagged.extend(c.flagged);
     }
     if let Some(v) = req.seen {
+        if !seen.is_empty() {
+            let data = serde_json::json!({ "threads": req.threads, "seen": v });
+            st.emit_hook(cu.user.id, "message.read", data).await;
+        }
         st.sync.store_flag(&seen, "\\Seen", v);
     }
     if let Some(v) = req.flagged {
@@ -160,6 +168,8 @@ pub async fn label_threads(
     check_threads(&req.threads)?;
     let udb = st.user_db(cu.user.id).await?;
     udb.label_threads(&req.threads, &req.add, &req.remove).await?;
+    let data = serde_json::json!({ "threads": req.threads, "add": req.add, "remove": req.remove });
+    st.emit_hook(cu.user.id, "thread.labeled", data).await;
     for a in accounts_of(&udb, &req.threads).await? {
         st.sync.emit(cu.user.id, a);
     }

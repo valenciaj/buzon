@@ -816,3 +816,138 @@ pub struct ImportResult {
     /// Direcciones que ya estaban (se completan sin pisar lo que tenían).
     pub existing: usize,
 }
+
+// ---------- Tokens y webhooks ----------
+
+/// Token personal de la API. El token completo solo se muestra al crearlo.
+#[derive(Serialize, ToSchema)]
+pub struct TokenOut {
+    #[schema(value_type = String)]
+    pub id: Id,
+    pub name: String,
+    /// Primeros caracteres del token, para reconocerlo.
+    pub prefix: String,
+    pub scopes: Vec<String>,
+    pub created_at: i64,
+    pub expires_at: Option<i64>,
+    pub last_used_at: Option<i64>,
+}
+
+impl From<buzon_store::tokens::ApiToken> for TokenOut {
+    fn from(t: buzon_store::tokens::ApiToken) -> Self {
+        TokenOut {
+            id: t.id,
+            name: t.name,
+            prefix: t.prefix,
+            scopes: t.scopes,
+            created_at: t.created_at,
+            expires_at: t.expires_at,
+            last_used_at: t.last_used_at,
+        }
+    }
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct TokenInput {
+    pub name: String,
+    /// `mail:read`, `mail:write`, `mail:send`, `contacts` o `webhooks`.
+    pub scopes: Vec<String>,
+    /// Días hasta que caduca (1 a 365). Sin él, no caduca.
+    pub expires_days: Option<i64>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct TokenCreated {
+    #[serde(flatten)]
+    pub info: TokenOut,
+    /// El token. Guárdalo ahora: no se vuelve a mostrar.
+    pub token: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct WebhookOut {
+    #[schema(value_type = String)]
+    pub id: Id,
+    pub url: String,
+    pub description: String,
+    pub events: Vec<String>,
+    pub active: bool,
+    pub created_at: i64,
+    /// Cómo acabó el último envío: `ok`, `failed` o nada si aún no hay.
+    pub last_status: Option<String>,
+}
+
+impl From<buzon_store::hooks::Webhook> for WebhookOut {
+    fn from(w: buzon_store::hooks::Webhook) -> Self {
+        WebhookOut {
+            id: w.id,
+            url: w.url,
+            description: w.description,
+            events: w.events,
+            active: w.active,
+            created_at: w.created_at,
+            last_status: w.last_status,
+        }
+    }
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct WebhookInput {
+    /// `https://…`. Sin HTTPS o a la red local solo si el servidor lo permite.
+    pub url: String,
+    #[serde(default)]
+    pub description: String,
+    pub events: Vec<String>,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct WebhookUpdate {
+    pub url: Option<String>,
+    pub description: Option<String>,
+    pub events: Option<Vec<String>>,
+    pub active: Option<bool>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct WebhookCreated {
+    #[serde(flatten)]
+    pub info: WebhookOut,
+    /// Secreto para comprobar la firma. Guárdalo ahora: no se vuelve a mostrar.
+    pub secret: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct DeliveryOut {
+    #[schema(value_type = String)]
+    pub id: Id,
+    pub event: String,
+    /// `pending` (por enviar o reintentar), `ok` o `failed` (se agotaron los reintentos).
+    pub status: String,
+    pub attempts: i64,
+    /// Cuándo es el próximo intento.
+    pub next_at: Option<i64>,
+    /// Código HTTP de la última respuesta.
+    pub response: Option<i64>,
+    pub error: Option<String>,
+    pub created_at: i64,
+    pub finished_at: Option<i64>,
+    /// El JSON enviado.
+    pub payload: String,
+}
+
+impl From<buzon_store::hooks::Delivery> for DeliveryOut {
+    fn from(d: buzon_store::hooks::Delivery) -> Self {
+        DeliveryOut {
+            id: d.id,
+            event: d.event,
+            status: d.status,
+            attempts: d.attempts,
+            next_at: d.next_at,
+            response: d.response,
+            error: d.error,
+            created_at: d.created_at,
+            finished_at: d.finished_at,
+            payload: d.payload,
+        }
+    }
+}

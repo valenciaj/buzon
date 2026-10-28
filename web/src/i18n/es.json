@@ -157,7 +157,8 @@
       "accounts": "Cuentas de correo",
       "invitations": "Invitaciones",
       "identities": "Identidades y firmas",
-      "labels": "Etiquetas y filtros"
+      "labels": "Etiquetas y filtros",
+      "api": "API"
     },
     "back": "Volver al correo"
   },
@@ -513,6 +514,76 @@
       "unsnooze_other": "{{count}} ya no están pospuestas.",
       "approved": "{{name}} aprobado: irá a {{bucket}}.",
       "blocked": "{{name}} rechazado."
+    }
+  },
+  "api": {
+    "intro": "Para conectar Buzón con scripts y otras apps (n8n, Zapier, Home Assistant…).",
+    "docs": "Ver la documentación de la API",
+    "copyNow": "Cópialo ahora y guárdalo en un sitio seguro: no se volverá a mostrar.",
+    "tokens": {
+      "title": "Tokens personales",
+      "body": "Un token da acceso a tu correo sin tu contraseña. Dale solo los permisos que necesite. Se envía en la cabecera Authorization: Bearer.",
+      "name": "Nombre",
+      "namePlaceholder": "Para qué es (por ejemplo, «Script de facturas»)",
+      "scopes": "Permisos",
+      "expiry": "Caduca",
+      "never": "Nunca",
+      "days_one": "En {{count}} día",
+      "days_other": "En {{count}} días",
+      "create": "Crear token",
+      "token": "Token",
+      "none": "No tienes tokens.",
+      "used": "Usado el {{date}}",
+      "unused": "Sin usar",
+      "expires": "caduca el {{date}}",
+      "noExpiry": "no caduca",
+      "revoke": "Revocar",
+      "revokeConfirm": "¿Revocar «{{name}}»? Lo que lo use dejará de funcionar al momento."
+    },
+    "scopes": {
+      "mail_read": "leer el correo, carpetas y etiquetas",
+      "mail_write": "mover, marcar, etiquetar y filtrar",
+      "mail_send": "escribir borradores y enviar",
+      "contacts": "leer y cambiar los contactos",
+      "webhooks": "gestionar los webhooks"
+    },
+    "hooks": {
+      "title": "Webhooks",
+      "body": "Buzón avisa a una URL cada vez que pasa algo. Cada aviso va firmado con un secreto; si falla, se reintenta durante casi 24 horas.",
+      "url": "URL",
+      "description": "Descripción",
+      "descriptionPlaceholder": "Para recordar qué es",
+      "events": "Eventos",
+      "create": "Crear webhook",
+      "secret": "Secreto de firma",
+      "none": "No tienes webhooks.",
+      "paused": "En pausa",
+      "test": "Probar",
+      "history": "Historial",
+      "pause": "Pausar",
+      "resume": "Reanudar",
+      "delete": "Borrar",
+      "deleteConfirm": "¿Borrar este webhook y su historial?",
+      "noDeliveries": "Todavía no se ha enviado nada.",
+      "attempts_one": "{{count}} intento",
+      "attempts_other": "{{count}} intentos",
+      "nextAt": "próximo intento el {{date}}",
+      "payload": "Contenido",
+      "redeliver": "Reenviar"
+    },
+    "events": {
+      "message_received": "llega un correo a la entrada",
+      "message_sent": "envías un correo",
+      "message_read": "marcas un hilo como leído o no leído",
+      "message_moved": "mueves hilos (archivar, papelera, spam…)",
+      "thread_labeled": "pones o quitas etiquetas",
+      "contact_screened": "apruebas o rechazas a un remitente",
+      "account_sync_failed": "una cuenta deja de sincronizar"
+    },
+    "status": {
+      "ok": "Entregado",
+      "failed": "Falló",
+      "pending": "Pendiente"
     }
   }
 }

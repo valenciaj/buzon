@@ -322,6 +322,54 @@ async function uploadFile(file: File): Promise<Upload> {
   return data as Upload
 }
 
+export const SCOPES = ['mail:read', 'mail:write', 'mail:send', 'contacts', 'webhooks'] as const
+export type Scope = (typeof SCOPES)[number]
+
+export const HOOK_EVENTS = [
+  'message.received', 'message.sent', 'message.read', 'message.moved',
+  'thread.labeled', 'contact.screened', 'account.sync_failed',
+] as const
+export type HookEvent = (typeof HOOK_EVENTS)[number]
+
+export interface ApiToken {
+  id: string
+  name: string
+  prefix: string
+  scopes: Scope[]
+  created_at: number
+  expires_at: number | null
+  last_used_at: number | null
+}
+
+export interface Webhook {
+  id: string
+  url: string
+  description: string
+  events: HookEvent[]
+  active: boolean
+  created_at: number
+  last_status: 'ok' | 'failed' | null
+}
+
+export interface WebhookInput {
+  url: string
+  description: string
+  events: HookEvent[]
+}
+
+export interface Delivery {
+  id: string
+  event: HookEvent | 'ping'
+  status: 'pending' | 'ok' | 'failed'
+  attempts: number
+  next_at: number | null
+  response: number | null
+  error: string | null
+  created_at: number
+  finished_at: number | null
+  payload: string
+}
+
 function query(params: Record<string, string | undefined>): string {
   const q = new URLSearchParams()
   for (const [k, v] of Object.entries(params)) if (v) q.set(k, v)
@@ -388,6 +436,17 @@ export const api = {
     call<Sender>('PUT', '/senders', { email, status, bucket }),
   setFlow: (threads: string[], change: FlowChange) => call<void>('POST', '/threads/flow', { threads, ...change }),
   setNote: (id: string, note: string) => call<void>('PUT', `/threads/${id}/note`, { note }),
+  tokens: () => call<ApiToken[]>('GET', '/tokens'),
+  createToken: (name: string, scopes: Scope[], expires_days?: number) =>
+    call<ApiToken & { token: string }>('POST', '/tokens', { name, scopes, expires_days }),
+  revokeToken: (id: string) => call<void>('DELETE', `/tokens/${id}`),
+  webhooks: () => call<Webhook[]>('GET', '/webhooks'),
+  createWebhook: (w: WebhookInput) => call<Webhook & { secret: string }>('POST', '/webhooks', w),
+  updateWebhook: (id: string, w: Partial<WebhookInput> & { active?: boolean }) => call<Webhook>('PUT', `/webhooks/${id}`, w),
+  deleteWebhook: (id: string) => call<void>('DELETE', `/webhooks/${id}`),
+  testWebhook: (id: string) => call<void>('POST', `/webhooks/${id}/test`),
+  deliveries: (id: string) => call<Delivery[]>('GET', `/webhooks/${id}/deliveries`),
+  redeliver: (id: string) => call<Delivery>('POST', `/webhooks/deliveries/${id}/redeliver`),
   invitations: () => call<InvitationOut[]>('GET', '/invitations'),
   createInvitation: (note?: string) =>
     call<{ id: string; url: string; expires_at: number }>('POST', '/invitations', { note }),
