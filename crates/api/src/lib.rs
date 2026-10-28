@@ -27,7 +27,7 @@ pub mod session;
 mod validate;
 
 use error::{ApiError, ApiResult};
-use routes::{accounts, auth, compose, invitations, mail, me, setup};
+use routes::{accounts, auth, compose, invitations, mail, me, organize, setup};
 
 pub struct AppState {
     pub db: AppDb,
@@ -152,6 +152,10 @@ impl AppState {
         compose::upload, compose::delete_upload,
         compose::drafts, compose::create_draft, compose::update_draft, compose::delete_draft,
         compose::send_mail, compose::contacts,
+        organize::move_threads, organize::delete_threads, organize::flag_threads, organize::label_threads,
+        organize::labels, organize::create_label, organize::update_label, organize::delete_label,
+        organize::rules, organize::create_rule, organize::update_rule, organize::delete_rule,
+        organize::book, organize::create_entry, organize::update_entry, organize::delete_entry, organize::import_vcard,
         invitations::create, invitations::list, invitations::revoke, invitations::check, invitations::accept,
     ),
     tags(
@@ -161,6 +165,7 @@ impl AppState {
         (name = "accounts", description = "Cuentas de correo del usuario"),
         (name = "mail", description = "Carpetas, hilos, mensajes y avisos en vivo"),
         (name = "compose", description = "Redactar y enviar: identidades, firmas, borradores y adjuntos"),
+        (name = "organize", description = "Mover y borrar hilos, etiquetas, filtros automáticos y contactos"),
         (name = "invitations", description = "Registro por invitación (caduca a las 72 h)"),
     )
 )]
@@ -237,7 +242,24 @@ pub fn api_router(state: Arc<AppState>) -> Router {
         .route("/drafts", get(compose::drafts).post(compose::create_draft))
         .route("/drafts/{id}", put(compose::update_draft).delete(compose::delete_draft))
         .route("/send", post(compose::send_mail))
-        .route("/contacts", get(compose::contacts))
+        .route("/contacts/suggest", get(compose::contacts))
+        .route("/contacts", get(organize::book).post(organize::create_entry))
+        .route("/contacts/import", post(organize::import_vcard))
+        .route(
+            "/contacts/{id}",
+            put(organize::update_entry).delete(organize::delete_entry),
+        )
+        .route("/threads/move", post(organize::move_threads))
+        .route("/threads/delete", post(organize::delete_threads))
+        .route("/threads/flags", post(organize::flag_threads))
+        .route("/threads/labels", post(organize::label_threads))
+        .route("/labels", get(organize::labels).post(organize::create_label))
+        .route(
+            "/labels/{id}",
+            put(organize::update_label).delete(organize::delete_label),
+        )
+        .route("/rules", get(organize::rules).post(organize::create_rule))
+        .route("/rules/{id}", put(organize::update_rule).delete(organize::delete_rule))
         .route("/invitations", get(invitations::list).post(invitations::create))
         .route("/invitations/{id}", delete(invitations::revoke))
         .route("/invite/{token}", get(invitations::check).post(invitations::accept))

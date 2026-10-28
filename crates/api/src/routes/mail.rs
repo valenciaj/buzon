@@ -10,6 +10,7 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use buzon_store::mail::{decode_mailbox_name, ThreadQuery};
+use buzon_store::organize::parse_search;
 use buzon_store::user::user_raw_dir;
 use buzon_store::Id;
 use serde::Deserialize;
@@ -72,6 +73,12 @@ pub struct ThreadParams {
     pub cursor: Option<String>,
     /// Hilos por página (1 a 100; 50 por defecto).
     pub limit: Option<u32>,
+    /// Solo hilos con esta etiqueta (id).
+    pub label: Option<String>,
+    /// Búsqueda. Además del texto libre entiende `de:` `para:` `asunto:` `etiqueta:`
+    /// `en:` (entrada, enviados, archivo…) `tiene:adjunto` `es:noleido` `es:destacado`
+    /// `despues:AAAA-MM-DD` y `antes:AAAA-MM-DD` (también en inglés: `from:`, `in:`…).
+    pub q: Option<String>,
 }
 
 fn parse_cursor(c: &str) -> ApiResult<(i64, Id)> {
@@ -94,14 +101,30 @@ pub async fn threads(
         }
     }
     let limit = p.limit.unwrap_or(50).clamp(1, 100);
+    let udb = st.user_db(cu.user.id).await?;
+    let search = p.q.as_deref().map(parse_search).filter(|s| !s.is_empty());
+    let mut label = p.label.as_deref().map(parse_id).transpose()?;
+    if let Some(name) = search.as_ref().and_then(|s| s.label.as_deref()) {
+        match udb.label_by_name(name).await? {
+            Some(l) => label = Some(l),
+            // Una etiqueta que no existe no tiene hilos.
+            None => {
+                return Ok(Json(ThreadPage {
+                    threads: Vec::new(),
+                    next_cursor: None,
+                }))
+            }
+        }
+    }
     let q = ThreadQuery {
         account: p.account.as_deref().map(parse_id).transpose()?,
         mailbox: p.mailbox.as_deref().map(parse_id).transpose()?,
         role: p.role,
         before: p.cursor.as_deref().map(parse_cursor).transpose()?,
         limit,
+        label,
+        search,
     };
-    let udb = st.user_db(cu.user.id).await?;
     let threads = udb.threads(&q).await?;
     let next_cursor = (threads.len() == limit as usize)
         .then(|| threads.last().map(|t| format!("{}.{}", t.last_date, t.id)))
@@ -157,6 +180,7 @@ pub async fn thread(
         })
         .collect();
     Ok(Json(ThreadDetail {
+        labels: udb.thread_labels(t.id).await?,
         id: t.id,
         account_id: t.account_id,
         subject: t.subject,

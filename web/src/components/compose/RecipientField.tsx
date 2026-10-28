@@ -26,7 +26,7 @@ export function RecipientField({ label, value, onChange, autoFocus, children }: 
     return () => clearTimeout(h)
   }, [typed])
   const taken = new Set(value.map((a) => a.email.toLowerCase()))
-  const q = useQuery({ queryKey: ['contacts', term], queryFn: () => api.contacts(term), enabled: term.length > 0, staleTime: 30_000 })
+  const q = useQuery({ queryKey: ['contacts', term], queryFn: () => api.suggest(term), enabled: term.length > 0, staleTime: 30_000 })
   const suggestions = typed.trim() ? (q.data ?? []).filter((c) => !taken.has(c.email.toLowerCase())) : []
 
   function add(list: Addr[]) {

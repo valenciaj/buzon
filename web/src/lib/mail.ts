@@ -5,18 +5,42 @@ import type { Mailbox, Role } from './api'
 export const ROLE_ORDER: Role[] = ['inbox', 'sent', 'drafts', 'archive', 'junk', 'trash']
 export const ACCOUNT_COLORS = ['#2f9a72', '#c4683a', '#7a3fa0', '#3d7fb5', '#a8862a']
 
-/** Lo que se está viendo: un tipo de carpeta (en una cuenta o en todas) o una carpeta concreta. */
-export type Box = { role: Role } | { mailbox: string }
+/**
+ * Lo que se está viendo: un tipo de carpeta (en una cuenta o en todas), una carpeta
+ * concreta o una etiqueta.
+ */
+export type Box = { role: Role } | { mailbox: string } | { label: string }
 
 export function parseBox(s: string | null): Box {
   if (s?.startsWith('m:')) return { mailbox: s.slice(2) }
+  if (s?.startsWith('l:')) return { label: s.slice(2) }
   if (s && (ROLE_ORDER as string[]).includes(s)) return { role: s as Role }
   return { role: 'inbox' }
 }
 
 export function boxKey(b: Box): string {
-  return 'role' in b ? b.role : `m:${b.mailbox}`
+  return 'role' in b ? b.role : 'mailbox' in b ? `m:${b.mailbox}` : `l:${b.label}`
 }
+
+/** Acciones que tienen sentido para los hilos de una carpeta. */
+export type MailAction = 'archive' | 'inbox' | 'trash' | 'junk' | 'delete'
+
+export function actionsFor(role: Role | null | undefined): MailAction[] {
+  switch (role) {
+    case 'archive':
+      return ['inbox', 'trash', 'junk']
+    case 'trash':
+    case 'junk':
+      return ['inbox', 'delete']
+    case 'sent':
+    case 'drafts':
+      return ['trash']
+    default:
+      return ['archive', 'trash', 'junk']
+  }
+}
+
+export const LABEL_COLORS = ['#2f9a72', '#3d7fb5', '#7a3fa0', '#c4683a', '#a8862a', '#c2415b', '#5b6b7f']
 
 /** Carpetas sin tipo especial, ordenadas por nombre. */
 export function customFolders(mailboxes: Mailbox[], account?: string): Mailbox[] {

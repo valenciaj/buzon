@@ -252,6 +252,9 @@ pub struct ThreadOut {
     pub unread: i64,
     pub flagged: bool,
     pub has_attachments: bool,
+    /// Ids de sus etiquetas.
+    #[schema(value_type = Vec<String>)]
+    pub labels: Vec<Id>,
 }
 
 impl From<buzon_store::mail::ThreadSummary> for ThreadOut {
@@ -267,6 +270,7 @@ impl From<buzon_store::mail::ThreadSummary> for ThreadOut {
             unread: t.unread,
             flagged: t.flagged,
             has_attachments: t.has_attachments,
+            labels: t.labels,
         }
     }
 }
@@ -318,6 +322,8 @@ pub struct ThreadDetail {
     #[schema(value_type = String)]
     pub account_id: Id,
     pub subject: String,
+    #[schema(value_type = Vec<String>)]
+    pub labels: Vec<Id>,
     pub messages: Vec<MessageOut>,
 }
 
@@ -484,4 +490,201 @@ pub struct SendResult {
 pub struct ContactOut {
     pub name: Option<String>,
     pub email: String,
+}
+
+// ---------- Organizar ----------
+
+/// Varios hilos a la vez. `from_role` o `from_mailbox` limitan la acción a los mensajes
+/// de esa carpeta (la que se está viendo); sin ellos, a todos menos Enviados y Borradores.
+#[derive(Deserialize, ToSchema)]
+pub struct ThreadsMove {
+    #[schema(value_type = Vec<String>)]
+    pub threads: Vec<Id>,
+    pub from_role: Option<String>,
+    #[schema(value_type = Option<String>)]
+    pub from_mailbox: Option<Id>,
+    /// `inbox`, `archive`, `trash` o `junk`.
+    pub to_role: Option<String>,
+    #[schema(value_type = Option<String>)]
+    pub to_mailbox: Option<Id>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct MoveResult {
+    /// Mensajes movidos.
+    pub moved: usize,
+}
+
+/// Borra para siempre lo que esos hilos tienen en la papelera o en spam.
+#[derive(Deserialize, ToSchema)]
+pub struct ThreadsDelete {
+    #[schema(value_type = Vec<String>)]
+    pub threads: Vec<Id>,
+    pub from_role: Option<String>,
+    #[schema(value_type = Option<String>)]
+    pub from_mailbox: Option<Id>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct DeleteResult {
+    pub deleted: usize,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct ThreadsFlags {
+    #[schema(value_type = Vec<String>)]
+    pub threads: Vec<Id>,
+    pub seen: Option<bool>,
+    pub flagged: Option<bool>,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct ThreadsLabels {
+    #[schema(value_type = Vec<String>)]
+    pub threads: Vec<Id>,
+    #[serde(default)]
+    #[schema(value_type = Vec<String>)]
+    pub add: Vec<Id>,
+    #[serde(default)]
+    #[schema(value_type = Vec<String>)]
+    pub remove: Vec<Id>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct LabelOut {
+    #[schema(value_type = String)]
+    pub id: Id,
+    pub name: String,
+    /// Color en formato `#rrggbb`.
+    pub color: String,
+    pub threads: i64,
+    pub unread: i64,
+}
+
+impl From<buzon_store::organize::Label> for LabelOut {
+    fn from(l: buzon_store::organize::Label) -> Self {
+        LabelOut {
+            id: l.id,
+            name: l.name,
+            color: l.color,
+            threads: l.threads,
+            unread: l.unread,
+        }
+    }
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct LabelInput {
+    pub name: String,
+    pub color: String,
+}
+
+/// Filtro automático para el correo nuevo de la bandeja de entrada. Las condiciones
+/// vacías no cuentan; las demás deben cumplirse todas (sin distinguir mayúsculas).
+#[derive(Serialize, Deserialize, ToSchema)]
+pub struct RuleData {
+    pub name: String,
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    /// Solo el correo de esta cuenta. Sin ella, el de todas.
+    #[schema(value_type = Option<String>)]
+    pub account_id: Option<Id>,
+    /// El remitente (nombre o dirección) contiene…
+    #[serde(default)]
+    pub from_has: String,
+    /// Algún destinatario (Para o Cc) contiene…
+    #[serde(default)]
+    pub to_has: String,
+    #[serde(default)]
+    pub subject_has: String,
+    #[serde(default)]
+    pub body_has: String,
+    /// Etiqueta que se pone.
+    #[schema(value_type = Option<String>)]
+    pub label_id: Option<Id>,
+    #[serde(default)]
+    pub mark_read: bool,
+    #[serde(default)]
+    pub star: bool,
+    /// `archive`, `trash`, `junk` o vacío (se queda en la entrada).
+    #[serde(default)]
+    pub move_to: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct RuleOut {
+    #[schema(value_type = String)]
+    pub id: Id,
+    #[serde(flatten)]
+    pub rule: RuleData,
+}
+
+impl From<buzon_store::organize::Rule> for RuleOut {
+    fn from(r: buzon_store::organize::Rule) -> Self {
+        RuleOut {
+            id: r.id.expect("guardado"),
+            rule: RuleData {
+                name: r.name,
+                enabled: r.enabled,
+                account_id: r.account_id,
+                from_has: r.from_has,
+                to_has: r.to_has,
+                subject_has: r.subject_has,
+                body_has: r.body_has,
+                label_id: r.label_id,
+                mark_read: r.mark_read,
+                star: r.star,
+                move_to: r.move_to,
+            },
+        }
+    }
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct BookEntryOut {
+    #[schema(value_type = String)]
+    pub id: Id,
+    pub name: String,
+    pub email: String,
+    pub phone: String,
+    pub notes: String,
+    /// `manual`, `sent` (alguien a quien escribiste) o `vcard`.
+    pub source: String,
+}
+
+impl From<buzon_store::organize::BookEntry> for BookEntryOut {
+    fn from(e: buzon_store::organize::BookEntry) -> Self {
+        BookEntryOut {
+            id: e.id.expect("guardado"),
+            name: e.name,
+            email: e.email,
+            phone: e.phone,
+            notes: e.notes,
+            source: e.source,
+        }
+    }
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct BookEntryInput {
+    #[serde(default)]
+    pub name: String,
+    pub email: String,
+    #[serde(default)]
+    pub phone: String,
+    #[serde(default)]
+    pub notes: String,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct VcardImport {
+    /// Contenido del fichero `.vcf`.
+    pub vcard: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct ImportResult {
+    pub added: usize,
+    /// Direcciones que ya estaban (se completan sin pisar lo que tenían).
+    pub existing: usize,
 }

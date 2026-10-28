@@ -10,8 +10,9 @@ import { Alert, Field, Logo, Segmented } from '../components/ui'
 import { LookPicker } from '../components/LookPicker'
 import { TotpPanel } from '../components/TotpPanel'
 import { AccountForm, EMPTY_ACCOUNT } from '../components/AccountForm'
+import { LabelsAndRules } from '../components/LabelsAndRules'
 
-const TABS = ['look', 'security', 'accounts', 'identities', 'invitations'] as const
+const TABS = ['look', 'security', 'accounts', 'identities', 'labels', 'invitations'] as const
 type Tab = (typeof TABS)[number]
 
 export default function Settings({ me }: { me: Me }) {
@@ -39,6 +40,7 @@ export default function Settings({ me }: { me: Me }) {
       {current === 'security' && <SecurityTab me={me} />}
       {current === 'accounts' && <AccountsTab />}
       {current === 'identities' && <IdentitiesTab />}
+      {current === 'labels' && <LabelsAndRules />}
       {current === 'invitations' && me.is_admin && <InvitationsTab />}
     </div>
   )

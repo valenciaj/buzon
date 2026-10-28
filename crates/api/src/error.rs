@@ -63,6 +63,21 @@ impl From<buzon_store::Error> for ApiError {
         match e {
             buzon_store::Error::Duplicate => Self::conflict("duplicate", "Ese nombre de usuario ya existe."),
             buzon_store::Error::BadId => Self::not_found("No existe."),
+            buzon_store::Error::MissingFolder(role) => {
+                let what = match role.as_str() {
+                    "archive" => "de archivo",
+                    "trash" => "papelera",
+                    "junk" => "de spam",
+                    "inbox" => "de entrada",
+                    _ => "de ese tipo",
+                };
+                Self::conflict(
+                    "missing_folder",
+                    format!(
+                        "La cuenta no tiene carpeta {what} en el servidor. Créala en tu correo y vuelve a intentarlo."
+                    ),
+                )
+            }
             e => {
                 tracing::error!("error interno: {e}");
                 Self::new(

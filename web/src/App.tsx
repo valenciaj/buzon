@@ -9,6 +9,7 @@ import Login from './pages/Login'
 import Invite from './pages/Invite'
 import Home from './pages/Home'
 import Settings from './pages/Settings'
+import Contacts from './pages/Contacts'
 
 export default function App() {
   const { t } = useTranslation()
@@ -30,6 +31,7 @@ export default function App() {
       <Route path="/login" element={me.data ? <Navigate to="/" replace /> : <Login />} />
       <Route path="/setup" element={<Navigate to="/" replace />} />
       <Route path="/settings/:tab?" element={me.data ? <Settings me={me.data} /> : <Navigate to="/login" replace />} />
+      <Route path="/contacts" element={me.data ? <Contacts /> : <Navigate to="/login" replace />} />
       <Route path="/" element={me.data ? <Home me={me.data} /> : <Navigate to="/login" replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

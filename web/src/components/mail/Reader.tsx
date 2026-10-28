@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import { api, type Addr, type Message, type Thread } from '../../lib/api'
-import { emailDocument, fileSize, initials, linkify, longDate, shortDate } from '../../lib/mail'
+import { api, type Addr, type Mailbox, type Message, type Thread } from '../../lib/api'
+import { emailDocument, fileSize, initials, linkify, longDate, shortDate, type MailAction } from '../../lib/mail'
 import {
   addrText, emptyCompose, forwardHtml, pickIdentity, prefixSubject, quoteHtml, replyRecipients, signatureHtml,
 } from '../../lib/compose'
@@ -10,11 +10,30 @@ import { useCompose } from '../compose/ComposerProvider'
 import { FONTS } from '../../lib/look'
 import { Alert } from '../ui'
 import { Icon } from './Icons'
+import { LabelMenu, MoveMenu } from './Menus'
+import { LabelChip } from './ThreadList'
+import type { MoveTarget } from './useMailActions'
 
-export function Reader({ id, font, onBack }: { id: string | null; font: string; onBack: () => void }) {
+const ACTION_ICONS: Record<MailAction, string> = { archive: 'archive', inbox: 'inbox', trash: 'trash', junk: 'junk', delete: 'trash' }
+
+/** Atajo de teclado para responder al último mensaje del hilo abierto. */
+export const REPLY_EVENT = 'buzon:reply'
+export type ReplyKind = 'reply' | 'all' | 'forward'
+
+export function Reader({ id, font, onBack, actions, mailboxes, onMove, onLabel }: {
+  id: string | null
+  font: string
+  onBack: () => void
+  /** Lo que se puede hacer con el hilo según la carpeta en la que está. */
+  actions: MailAction[]
+  mailboxes: Mailbox[]
+  onMove: (target: MoveTarget) => void
+  onLabel: (add: string[], remove: string[]) => void
+}) {
   const { t } = useTranslation()
   const qc = useQueryClient()
   const q = useQuery({ queryKey: ['thread', id], queryFn: () => api.thread(id!), enabled: !!id })
+  const labels = useQuery({ queryKey: ['labels'], queryFn: api.labels })
   const update = useMutation({
     mutationFn: (change: { seen?: boolean; flagged?: boolean }) => api.updateThread(id!, change),
     onMutate: (change) => {
@@ -57,19 +76,38 @@ export function Reader({ id, font, onBack }: { id: string | null; font: string; 
   const flagged = th.messages.some((m) => m.flagged)
   return (
     <div className="mx-auto flex w-full max-w-[48rem] flex-col gap-4 px-[var(--pad)] pb-12 sm:px-6">
-      <div className="sticky top-0 z-[1] -mx-[var(--pad)] flex flex-wrap gap-1.5 border-b border-line bg-bg px-[var(--pad)] py-2.5 sm:-mx-6 sm:px-6">
-        <button className="btn btn-ghost px-2.5 md:hidden" onClick={onBack}>
-          <Icon name="back" /> {t('common.back')}
+      <div className="sticky top-0 z-[1] -mx-[var(--pad)] flex flex-wrap gap-0.5 border-b border-line bg-bg px-[var(--pad)] py-2.5 sm:-mx-6 sm:gap-1 sm:px-6">
+        <button className="btn btn-ghost mr-auto px-2.5 md:hidden" onClick={onBack} title={t('common.back')}>
+          <Icon name="back" /> <span className="max-[400px]:sr-only">{t('common.back')}</span>
         </button>
-        <button className="btn btn-ghost px-2.5" onClick={() => { update.mutate({ seen: false }); onBack() }}>
-          <Icon name="unread" /> <span className="max-sm:sr-only">{t('mail.markUnread')}</span>
+        {actions.map((a) => (
+          <button key={a} className={`btn btn-ghost px-2.5 ${a === 'delete' ? 'text-crit' : ''}`} onClick={() => onMove(a)} title={t(`actions.${a}`)}>
+            <Icon name={ACTION_ICONS[a]} /> <span className="sr-only">{t(`actions.${a}`)}</span>
+          </button>
+        ))}
+        <LabelMenu current={th.labels} onChange={onLabel} compact />
+        <MoveMenu mailboxes={mailboxes} account={th.account_id} compact
+          onMove={(m) => onMove({ mailbox: m.id, name: m.role ? t(`mail.roles.${m.role}`) : m.name })} />
+        <button className="btn btn-ghost px-2.5" title={t('mail.markUnread')} onClick={() => { update.mutate({ seen: false }); onBack() }}>
+          <Icon name="unread" /> <span className="sr-only">{t('mail.markUnread')}</span>
         </button>
-        <button className="btn btn-ghost px-2.5" aria-pressed={flagged} onClick={() => update.mutate({ flagged: !flagged })}>
+        <button className="btn btn-ghost px-2.5" aria-pressed={flagged} title={flagged ? t('mail.unflag') : t('mail.flag')}
+          onClick={() => update.mutate({ flagged: !flagged })}>
           <Icon name="star" filled={flagged} className={flagged ? 'text-warn' : ''} />
-          <span className="max-sm:sr-only">{flagged ? t('mail.unflag') : t('mail.flag')}</span>
+          <span className="sr-only">{flagged ? t('mail.unflag') : t('mail.flag')}</span>
         </button>
       </div>
-      <h2 className="text-2xl font-bold leading-tight sm:text-[1.75rem]">{th.subject || t('mail.noSubject')}</h2>
+      <div className="flex flex-col gap-2">
+        <h2 className="text-2xl font-bold leading-tight sm:text-[1.75rem]">{th.subject || t('mail.noSubject')}</h2>
+        {th.labels.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {th.labels.flatMap((l) => labels.data?.find((x) => x.id === l) ?? []).map((l) => (
+              <LabelChip key={l.id} label={l} onRemove={() => onLabel([], [l.id])} />
+            ))}
+          </div>
+        )}
+      </div>
+      <ReplyKeys message={th.messages[th.messages.length - 1]} thread={th} />
       <ol className="flex flex-col gap-3">
         {th.messages.map((m, i) => (
           <li key={m.id}>
@@ -90,7 +128,7 @@ function useReply(m: Message, th: Thread) {
   const { t, i18n } = useTranslation()
   const compose = useCompose()
   const identities = useQuery({ queryKey: ['identities'], queryFn: api.identities })
-  return (kind: 'reply' | 'all' | 'forward') => {
+  return (kind: ReplyKind) => {
     const list = identities.data ?? []
     const identity = pickIdentity(list, m, th.account_id)
     const base = emptyCompose(identity)
@@ -123,6 +161,23 @@ function useReply(m: Message, th: Thread) {
       replyTo: m.id,
     })
   }
+}
+
+function ReplyKeys({ message, thread }: { message?: Message; thread: Thread }) {
+  if (!message) return null
+  return <ReplyListener message={message} thread={thread} />
+}
+
+function ReplyListener({ message, thread }: { message: Message; thread: Thread }) {
+  const reply = useReply(message, thread)
+  const latest = useRef(reply)
+  latest.current = reply
+  useEffect(() => {
+    const on = (e: Event) => latest.current((e as CustomEvent<ReplyKind>).detail)
+    window.addEventListener(REPLY_EVENT, on)
+    return () => window.removeEventListener(REPLY_EVENT, on)
+  }, [])
+  return null
 }
 
 function MessageView({ message: m, thread, font, initiallyOpen }: { message: Message; thread: Thread; font: string; initiallyOpen: boolean }) {

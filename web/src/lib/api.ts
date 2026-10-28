@@ -80,6 +80,7 @@ export interface ThreadSummary {
   unread: number
   flagged: boolean
   has_attachments: boolean
+  labels: string[]
 }
 
 export interface ThreadPage {
@@ -117,6 +118,7 @@ export interface Thread {
   id: string
   account_id: string
   subject: string
+  labels: string[]
   messages: Message[]
 }
 
@@ -124,6 +126,9 @@ export interface ThreadFilter {
   account?: string
   mailbox?: string
   role?: Role
+  label?: string
+  /** Búsqueda (texto libre y `de:`, `tiene:adjunto`…). */
+  q?: string
 }
 
 export interface InvitationOut {
@@ -178,6 +183,52 @@ export interface Draft extends Omit<DraftInput, 'attachments'> {
   updated_at: number
 }
 
+export interface Label {
+  id: string
+  name: string
+  color: string
+  threads: number
+  unread: number
+}
+
+export type MoveRole = 'inbox' | 'archive' | 'trash' | 'junk'
+
+export interface RuleInput {
+  name: string
+  enabled: boolean
+  account_id: string | null
+  from_has: string
+  to_has: string
+  subject_has: string
+  body_has: string
+  label_id: string | null
+  mark_read: boolean
+  star: boolean
+  move_to: '' | 'archive' | 'trash' | 'junk'
+}
+
+export interface Rule extends RuleInput {
+  id: string
+}
+
+export interface ContactInput {
+  name: string
+  email: string
+  phone: string
+  notes: string
+}
+
+export interface Contact extends ContactInput {
+  id: string
+  source: 'manual' | 'sent' | 'vcard'
+}
+
+/** Dónde está lo que se mueve: la carpeta que se ve (si se ve una). */
+export interface From {
+  from_role?: Role
+  from_mailbox?: string
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -188,10 +239,12 @@ export class ApiError extends Error {
   }
 }
 
-async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function call<T>(method: string, path: string, body?: unknown, keepalive = false): Promise<T> {
   const res = await fetch(`/api/v1${path}`, {
     method,
     credentials: 'same-origin',
+    // Para que una acción pendiente llegue al servidor aunque se cierre la pestaña.
+    keepalive,
     headers: method === 'GET' ? {} : { 'Content-Type': 'application/json' },
     body: method === 'GET' ? undefined : JSON.stringify(body ?? {}),
   })
@@ -255,7 +308,28 @@ export const api = {
   updateDraft: (id: string, d: DraftInput) => call<Draft>('PUT', `/drafts/${id}`, d),
   deleteDraft: (id: string) => call<void>('DELETE', `/drafts/${id}`),
   send: (d: DraftInput & { draft_id?: string | null }) => call<{ message_id: string }>('POST', '/send', d),
-  contacts: (q: string) => call<Addr[]>('GET', `/contacts${query({ q })}`),
+  suggest: (q: string) => call<Addr[]>('GET', `/contacts/suggest${query({ q })}`),
+  contacts: (q?: string) => call<Contact[]>('GET', `/contacts${query({ q })}`),
+  createContact: (c: ContactInput) => call<Contact>('POST', '/contacts', c),
+  updateContact: (id: string, c: ContactInput) => call<Contact>('PUT', `/contacts/${id}`, c),
+  deleteContact: (id: string) => call<void>('DELETE', `/contacts/${id}`),
+  importContacts: (vcard: string) => call<{ added: number; existing: number }>('POST', '/contacts/import', { vcard }),
+  moveThreads: (threads: string[], to: { to_role?: MoveRole; to_mailbox?: string }, from: From = {}, keepalive = false) =>
+    call<{ moved: number }>('POST', '/threads/move', { threads, ...to, ...from }, keepalive),
+  deleteThreads: (threads: string[], from: From = {}, keepalive = false) =>
+    call<{ deleted: number }>('POST', '/threads/delete', { threads, ...from }, keepalive),
+  flagThreads: (threads: string[], change: { seen?: boolean; flagged?: boolean }) =>
+    call<void>('POST', '/threads/flags', { threads, ...change }),
+  labelThreads: (threads: string[], add: string[], remove: string[] = []) =>
+    call<void>('POST', '/threads/labels', { threads, add, remove }),
+  labels: () => call<Label[]>('GET', '/labels'),
+  createLabel: (name: string, color: string) => call<Label>('POST', '/labels', { name, color }),
+  updateLabel: (id: string, name: string, color: string) => call<Label>('PUT', `/labels/${id}`, { name, color }),
+  deleteLabel: (id: string) => call<void>('DELETE', `/labels/${id}`),
+  rules: () => call<Rule[]>('GET', '/rules'),
+  createRule: (r: RuleInput) => call<Rule>('POST', '/rules', r),
+  updateRule: (id: string, r: RuleInput) => call<Rule>('PUT', `/rules/${id}`, r),
+  deleteRule: (id: string) => call<void>('DELETE', `/rules/${id}`),
   invitations: () => call<InvitationOut[]>('GET', '/invitations'),
   createInvitation: (note?: string) =>
     call<{ id: string; url: string; expires_at: number }>('POST', '/invitations', { note }),

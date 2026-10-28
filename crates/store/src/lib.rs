@@ -6,6 +6,7 @@ pub mod compose;
 pub mod crypto;
 pub mod id;
 pub mod mail;
+pub mod organize;
 pub mod user;
 
 pub use app::AppDb;
@@ -26,6 +27,9 @@ pub enum Error {
     BadId,
     #[error("ya existe")]
     Duplicate,
+    /// La cuenta no tiene una carpeta de este tipo (archive, trash, junk…).
+    #[error("la cuenta no tiene carpeta «{0}»")]
+    MissingFolder(String),
 }
 
 pub(crate) fn map_unique(e: sqlx::Error) -> Error {

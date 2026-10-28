@@ -4,4 +4,5 @@ pub mod compose;
 pub mod invitations;
 pub mod mail;
 pub mod me;
+pub mod organize;
 pub mod setup;
