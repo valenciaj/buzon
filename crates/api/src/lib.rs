@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use axum::extract::Request;
+use axum::extract::{DefaultBodyLimit, Request};
 use axum::http::{header, Method};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -27,7 +27,7 @@ pub mod session;
 mod validate;
 
 use error::{ApiError, ApiResult};
-use routes::{accounts, auth, invitations, mail, me, setup};
+use routes::{accounts, auth, compose, invitations, mail, me, setup};
 
 pub struct AppState {
     pub db: AppDb,
@@ -148,6 +148,10 @@ impl AppState {
         me::get, me::update_preferences, me::totp_setup, me::totp_enable, me::totp_disable,
         accounts::list, accounts::create, accounts::remove, accounts::sync,
         mail::mailboxes, mail::threads, mail::thread, mail::update_thread, mail::attachment, mail::events,
+        compose::identities, compose::create_identity, compose::update_identity, compose::delete_identity,
+        compose::upload, compose::delete_upload,
+        compose::drafts, compose::create_draft, compose::update_draft, compose::delete_draft,
+        compose::send_mail, compose::contacts,
         invitations::create, invitations::list, invitations::revoke, invitations::check, invitations::accept,
     ),
     tags(
@@ -156,6 +160,7 @@ impl AppState {
         (name = "me", description = "Usuario actual, preferencias y 2FA"),
         (name = "accounts", description = "Cuentas de correo del usuario"),
         (name = "mail", description = "Carpetas, hilos, mensajes y avisos en vivo"),
+        (name = "compose", description = "Redactar y enviar: identidades, firmas, borradores y adjuntos"),
         (name = "invitations", description = "Registro por invitación (caduca a las 72 h)"),
     )
 )]
@@ -178,8 +183,11 @@ pub async fn health() -> Json<Health> {
 /// Rechaza peticiones que cambian datos sin `Content-Type: application/json`.
 /// Un formulario de otro sitio no puede enviar ese tipo sin una comprobación CORS previa,
 /// así que esto, junto a la cookie `SameSite=Lax`, cierra la puerta al CSRF.
+/// Las subidas de ficheros llevan la cabecera propia `X-Buzon-Filename`, que también
+/// obliga a esa comprobación previa.
 async fn require_json(req: Request, next: Next) -> Response {
-    let safe = matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS);
+    let safe = matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS)
+        || req.headers().contains_key("x-buzon-filename");
     let json = req
         .headers()
         .get(header::CONTENT_TYPE)
@@ -216,6 +224,20 @@ pub fn api_router(state: Arc<AppState>) -> Router {
         .route("/threads/{id}", get(mail::thread).patch(mail::update_thread))
         .route("/messages/{id}/attachments/{index}", get(mail::attachment))
         .route("/events", get(mail::events))
+        .route("/identities", get(compose::identities).post(compose::create_identity))
+        .route(
+            "/identities/{id}",
+            put(compose::update_identity).delete(compose::delete_identity),
+        )
+        .route(
+            "/uploads",
+            post(compose::upload).layer(DefaultBodyLimit::max(compose::MAX_UPLOAD)),
+        )
+        .route("/uploads/{id}", delete(compose::delete_upload))
+        .route("/drafts", get(compose::drafts).post(compose::create_draft))
+        .route("/drafts/{id}", put(compose::update_draft).delete(compose::delete_draft))
+        .route("/send", post(compose::send_mail))
+        .route("/contacts", get(compose::contacts))
         .route("/invitations", get(invitations::list).post(invitations::create))
         .route("/invitations/{id}", delete(invitations::revoke))
         .route("/invite/{token}", get(invitations::check).post(invitations::accept))

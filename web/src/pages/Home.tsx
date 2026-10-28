@@ -9,13 +9,27 @@ import { useSetMe } from '../lib/session'
 import { Sidebar } from '../components/mail/Sidebar'
 import { ThreadList } from '../components/mail/ThreadList'
 import { Reader } from '../components/mail/Reader'
+import { DraftList } from '../components/compose/DraftList'
+import { ComposerProvider, useCompose } from '../components/compose/ComposerProvider'
+import { emptyCompose, pickIdentity } from '../lib/compose'
 
 /**
  * El correo: barra lateral, lista de hilos y lector. Lo que se ve va en la URL
  * (`a` cuenta, `b` carpeta, `t` hilo) para que el botón Atrás funcione, también en el móvil.
  */
 export default function Home({ me }: { me: Me }) {
+  return (
+    <ComposerProvider>
+      <Mail me={me} />
+    </ComposerProvider>
+  )
+}
+
+function Mail({ me }: { me: Me }) {
   const { t } = useTranslation()
+  const compose = useCompose()
+  const identities = useQuery({ queryKey: ['identities'], queryFn: api.identities })
+  const drafts = useQuery({ queryKey: ['drafts'], queryFn: api.drafts })
   const navigate = useNavigate()
   const location = useLocation()
   const setMe = useSetMe()
@@ -72,6 +86,11 @@ export default function Home({ me }: { me: Me }) {
     }
   }
 
+  function newMessage() {
+    setDrawer(false)
+    compose(emptyCompose(pickIdentity(identities.data ?? [], null, account)))
+  }
+
   async function logout() {
     await api.logout().catch(() => undefined)
     setMe(null)
@@ -80,7 +99,8 @@ export default function Home({ me }: { me: Me }) {
 
   const side = (
     <Sidebar me={me} accounts={list} mailboxes={mailboxes.data ?? []} account={unified ? undefined : account} box={box}
-      onAccount={chooseAccount} onBox={(b) => { go({ b }); setDrawer(false) }} onLogout={logout} />
+      onAccount={chooseAccount} onBox={(b) => { go({ b }); setDrawer(false) }} onLogout={logout}
+      onCompose={list.length ? newMessage : undefined} />
   )
 
   return (
@@ -95,7 +115,9 @@ export default function Home({ me }: { me: Me }) {
       )}
       <section className={`${thread ? 'hidden md:flex' : 'flex'} min-h-0 w-full shrink-0 flex-col border-r border-line bg-surface md:w-[22rem] lg:w-[26rem]`}>
         <ThreadList title={title} filter={filter} accounts={list} selected={thread} grouped={focus}
-          showAccount={unified} onSelect={(id) => go({ t: id })} onMenu={() => setDrawer(true)} />
+          showAccount={unified} onSelect={(id) => go({ t: id })} onMenu={() => setDrawer(true)}
+          onCompose={list.length ? newMessage : undefined}
+          before={'role' in box && box.role === 'drafts' && drafts.data?.length ? <DraftList drafts={drafts.data} /> : null} />
       </section>
       <main className={`${thread ? 'flex' : 'hidden md:flex'} min-h-0 min-w-0 flex-1 flex-col overflow-y-auto`}>
         <Reader id={thread} font={me.preferences.font} onBack={back} />

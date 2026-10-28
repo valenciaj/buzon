@@ -3,6 +3,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { api, type Addr, type Message, type Thread } from '../../lib/api'
 import { emailDocument, fileSize, initials, linkify, longDate, shortDate } from '../../lib/mail'
+import {
+  addrText, emptyCompose, forwardHtml, pickIdentity, prefixSubject, quoteHtml, replyRecipients, signatureHtml,
+} from '../../lib/compose'
+import { useCompose } from '../compose/ComposerProvider'
 import { FONTS } from '../../lib/look'
 import { Alert } from '../ui'
 import { Icon } from './Icons'
@@ -69,7 +73,7 @@ export function Reader({ id, font, onBack }: { id: string | null; font: string; 
       <ol className="flex flex-col gap-3">
         {th.messages.map((m, i) => (
           <li key={m.id}>
-            <MessageView message={m} font={font} initiallyOpen={i === th.messages.length - 1 || !m.seen} />
+            <MessageView message={m} thread={th} font={font} initiallyOpen={i === th.messages.length - 1 || !m.seen} />
           </li>
         ))}
       </ol>
@@ -81,8 +85,50 @@ function people(list: Addr[]): string {
   return list.map((a) => a.name || a.email).join(', ')
 }
 
-function MessageView({ message: m, font, initiallyOpen }: { message: Message; font: string; initiallyOpen: boolean }) {
+/** Prepara una respuesta o un reenvío de un mensaje. */
+function useReply(m: Message, th: Thread) {
   const { t, i18n } = useTranslation()
+  const compose = useCompose()
+  const identities = useQuery({ queryKey: ['identities'], queryFn: api.identities })
+  return (kind: 'reply' | 'all' | 'forward') => {
+    const list = identities.data ?? []
+    const identity = pickIdentity(list, m, th.account_id)
+    const base = emptyCompose(identity)
+    const sig = signatureHtml(identity?.signature ?? '')
+    const date = longDate(m.date, i18n.language)
+    if (kind === 'forward') {
+      const lines: [string, string][] = [
+        [t('compose.fwdFrom'), m.from ? addrText(m.from) : ''],
+        [t('compose.fwdDate'), date],
+        [t('compose.fwdSubject'), m.subject],
+        [t('compose.fwdTo'), m.to.map(addrText).join(', ')],
+      ]
+      compose({
+        ...base,
+        subject: prefixSubject('Fwd', m.subject),
+        html: `<p></p>${sig}${forwardHtml(t('compose.forwarded'), lines, m)}`,
+        forwardOf: m.id,
+        forwarded: m.attachments.filter((a) => !a.inline),
+      })
+      return
+    }
+    const { to, cc } = replyRecipients(m, kind === 'all', list.map((i) => i.email))
+    const who = m.from?.name || m.from?.email || '?'
+    compose({
+      ...base,
+      to,
+      cc,
+      subject: prefixSubject('Re', m.subject),
+      html: `<p></p>${sig}${quoteHtml(t('compose.wrote', { date, name: who }), m)}`,
+      replyTo: m.id,
+    })
+  }
+}
+
+function MessageView({ message: m, thread, font, initiallyOpen }: { message: Message; thread: Thread; font: string; initiallyOpen: boolean }) {
+  const { t, i18n } = useTranslation()
+  const reply = useReply(m, thread)
+  const many = m.to.length + m.cc.length > 1
   const [open, setOpen] = useState(initiallyOpen)
   const [images, setImages] = useState(false)
   const name = m.from?.name || m.from?.email || '?'
@@ -101,6 +147,9 @@ function MessageView({ message: m, font, initiallyOpen }: { message: Message; fo
             {open ? <>{m.from?.email}{m.to.length > 0 && <> · {t('mail.to')} {people(m.to)}</>}</> : preview}
           </span>
         </span>
+        {m.answered && <span className="shrink-0 self-start pt-0.5 text-muted" title={t('compose.answered')}>
+          <Icon name="reply" className="size-4" /><span className="sr-only">{t('compose.answered')}</span>
+        </span>}
         <time className="shrink-0 self-start text-sm text-muted tabular-nums" dateTime={new Date(m.date * 1000).toISOString()}>
           {open ? longDate(m.date, i18n.language) : shortDate(m.date, i18n.language)}
         </time>
@@ -138,6 +187,19 @@ function MessageView({ message: m, font, initiallyOpen }: { message: Message; fo
               ))}
             </ul>
           )}
+          <div className="flex flex-wrap gap-1.5 border-t border-line px-3 py-2">
+            <button className="btn btn-ghost px-3" onClick={() => reply('reply')}>
+              <Icon name="reply" /> {t('compose.replyAction')}
+            </button>
+            {many && (
+              <button className="btn btn-ghost px-3" onClick={() => reply('all')}>
+                <Icon name="replyAll" /> {t('compose.replyAll')}
+              </button>
+            )}
+            <button className="btn btn-ghost px-3" onClick={() => reply('forward')}>
+              <Icon name="forward" /> {t('compose.forwardAction')}
+            </button>
+          </div>
         </div>
       )}
     </article>

@@ -138,11 +138,11 @@ pub struct ImapTarget {
     pub uid: u32,
 }
 
-fn b(id: Id) -> Vec<u8> {
+pub(crate) fn b(id: Id) -> Vec<u8> {
     id.as_bytes().to_vec()
 }
 
-fn id_of(r: &sqlx::sqlite::SqliteRow, col: &str) -> Result<Id> {
+pub(crate) fn id_of(r: &sqlx::sqlite::SqliteRow, col: &str) -> Result<Id> {
     Id::from_slice(r.try_get::<&[u8], _>(col)?)
 }
 

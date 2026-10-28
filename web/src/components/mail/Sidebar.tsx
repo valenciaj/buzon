@@ -9,7 +9,7 @@ import { Icon } from './Icons'
 /** En Enfoque se ven pocas bandejas; el resto queda en «Más carpetas». */
 const FOCUS_MAIN: Role[] = ['inbox', 'sent', 'drafts']
 
-export function Sidebar({ me, accounts, mailboxes, account, box, onAccount, onBox, onLogout }: {
+export function Sidebar({ me, accounts, mailboxes, account, box, onAccount, onBox, onLogout, onCompose }: {
   me: Me
   accounts: Account[]
   mailboxes: Mailbox[]
@@ -19,6 +19,7 @@ export function Sidebar({ me, accounts, mailboxes, account, box, onAccount, onBo
   onAccount: (id: string | null) => void
   onBox: (b: Box) => void
   onLogout: () => void
+  onCompose?: () => void
 }) {
   const { t } = useTranslation()
   const focus = me.preferences.mode === 'focus'
@@ -53,6 +54,11 @@ export function Sidebar({ me, accounts, mailboxes, account, box, onAccount, onBo
   return (
     <nav className="flex h-full flex-col gap-5 overflow-y-auto p-4" aria-label={t('home.menu')}>
       <Logo />
+      {onCompose && (
+        <button className="btn btn-primary w-full" onClick={onCompose}>
+          <Icon name="compose" /> {t('compose.new')}
+        </button>
+      )}
       {accounts.length > 0 && (
         <div className="flex flex-col gap-2">
           <p className="eyebrow">{t('home.accounts')}</p>

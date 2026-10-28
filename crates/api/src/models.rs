@@ -327,3 +327,161 @@ pub struct ThreadUpdate {
     pub seen: Option<bool>,
     pub flagged: Option<bool>,
 }
+
+/// Remitente de una cuenta (su dirección o un alias) con su firma.
+#[derive(Serialize, ToSchema)]
+pub struct IdentityOut {
+    #[schema(value_type = String)]
+    pub id: Id,
+    #[schema(value_type = String)]
+    pub account_id: Id,
+    /// Nombre que verán los destinatarios. Vacío: solo la dirección.
+    pub name: String,
+    pub email: String,
+    /// Firma en texto plano; se añade al final de los correos nuevos.
+    pub signature: String,
+    pub is_default: bool,
+}
+
+impl From<buzon_store::compose::Identity> for IdentityOut {
+    fn from(i: buzon_store::compose::Identity) -> Self {
+        IdentityOut {
+            id: i.id,
+            account_id: i.account_id,
+            name: i.name,
+            email: i.email,
+            signature: i.signature,
+            is_default: i.is_default,
+        }
+    }
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct IdentityInput {
+    /// Cuenta a la que pertenece (solo al crearla).
+    #[schema(value_type = Option<String>)]
+    pub account_id: Option<Id>,
+    #[serde(default)]
+    pub name: String,
+    pub email: String,
+    #[serde(default)]
+    pub signature: String,
+    #[serde(default)]
+    pub is_default: bool,
+}
+
+#[derive(Serialize, Deserialize, ToSchema, Clone)]
+pub struct AddrIn {
+    pub name: Option<String>,
+    pub email: String,
+}
+
+impl From<AddrIn> for buzon_store::mail::Addr {
+    fn from(a: AddrIn) -> Self {
+        buzon_store::mail::Addr {
+            name: a.name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()),
+            email: a.email.trim().to_string(),
+        }
+    }
+}
+
+impl From<buzon_store::mail::Addr> for AddrIn {
+    fn from(a: buzon_store::mail::Addr) -> Self {
+        AddrIn {
+            name: a.name,
+            email: a.email,
+        }
+    }
+}
+
+/// Un correo a medias. Lo mismo sirve para guardarlo como borrador o para enviarlo.
+#[derive(Serialize, Deserialize, ToSchema)]
+pub struct DraftIn {
+    #[schema(value_type = Option<String>)]
+    pub identity_id: Option<Id>,
+    #[serde(default)]
+    pub to: Vec<AddrIn>,
+    #[serde(default)]
+    pub cc: Vec<AddrIn>,
+    #[serde(default)]
+    pub bcc: Vec<AddrIn>,
+    #[serde(default)]
+    pub subject: String,
+    /// Cuerpo en HTML (se sanea antes de enviarlo).
+    #[serde(default)]
+    pub html: String,
+    /// Cuerpo en texto plano.
+    #[serde(default)]
+    pub text: String,
+    /// Mensaje al que se responde.
+    #[schema(value_type = Option<String>)]
+    pub reply_to: Option<Id>,
+    /// Mensaje que se reenvía (sus adjuntos van incluidos).
+    #[schema(value_type = Option<String>)]
+    pub forward_of: Option<Id>,
+    /// Ids de ficheros subidos con `POST /uploads`.
+    #[serde(default)]
+    #[schema(value_type = Vec<String>)]
+    pub attachments: Vec<Id>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct UploadOut {
+    #[schema(value_type = String)]
+    pub id: Id,
+    pub name: String,
+    pub content_type: String,
+    pub size: u64,
+}
+
+impl From<buzon_store::compose::Upload> for UploadOut {
+    fn from(u: buzon_store::compose::Upload) -> Self {
+        UploadOut {
+            id: u.id,
+            name: u.name,
+            content_type: u.content_type,
+            size: u.size,
+        }
+    }
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct DraftOut {
+    #[schema(value_type = String)]
+    pub id: Id,
+    #[schema(value_type = Option<String>)]
+    pub identity_id: Option<Id>,
+    pub to: Vec<AddrIn>,
+    pub cc: Vec<AddrIn>,
+    pub bcc: Vec<AddrIn>,
+    pub subject: String,
+    pub html: String,
+    pub text: String,
+    #[schema(value_type = Option<String>)]
+    pub reply_to: Option<Id>,
+    #[schema(value_type = Option<String>)]
+    pub forward_of: Option<Id>,
+    pub attachments: Vec<UploadOut>,
+    pub updated_at: i64,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct SendRequest {
+    #[serde(flatten)]
+    pub message: DraftIn,
+    /// Borrador que se envía: se borra al terminar.
+    #[schema(value_type = Option<String>)]
+    pub draft_id: Option<Id>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct SendResult {
+    /// `Message-ID` del correo enviado.
+    pub message_id: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct ContactOut {
+    pub name: Option<String>,
+    pub email: String,
+}

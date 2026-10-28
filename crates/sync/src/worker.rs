@@ -186,17 +186,20 @@ async fn wait_poll(s: Session, rx: &mut mpsc::UnboundedReceiver<Cmd>, dur: Durat
 }
 
 async fn apply(s: &mut Session, cmd: Cmd) -> Result<()> {
-    if let Cmd::Store {
-        mailbox,
-        uids,
-        flag,
-        on,
-    } = cmd
-    {
-        s.select(&mailbox).await?;
-        let set = uid_set(&uids);
-        let query = format!("{}FLAGS.SILENT ({flag})", if on { "+" } else { "-" });
-        let _: Vec<Fetch> = s.uid_store(&set, &query).await?.try_collect().await?;
+    match cmd {
+        Cmd::Store {
+            mailbox,
+            uids,
+            flag,
+            on,
+        } => {
+            s.select(&mailbox).await?;
+            let set = uid_set(&uids);
+            let query = format!("{}FLAGS.SILENT ({flag})", if on { "+" } else { "-" });
+            let _: Vec<Fetch> = s.uid_store(&set, &query).await?.try_collect().await?;
+        }
+        Cmd::Append { mailbox, raw } => s.append(&mailbox, Some("(\\Seen)"), None, &raw).await?,
+        Cmd::SyncNow | Cmd::Stop => {}
     }
     Ok(())
 }

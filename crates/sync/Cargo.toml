@@ -9,6 +9,7 @@ ammonia.workspace = true
 async-imap.workspace = true
 buzon-store.workspace = true
 futures.workspace = true
+lettre.workspace = true
 mail-parser.workspace = true
 rustls.workspace = true
 serde.workspace = true

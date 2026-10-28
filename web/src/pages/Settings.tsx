@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { Link, NavLink, useParams } from 'react-router'
-import { api, ApiError, type AccountInput, type Language, type Me, type Preferences } from '../lib/api'
+import { api, ApiError, type AccountInput, type Identity, type IdentityInput, type Language, type Me, type Preferences } from '../lib/api'
 import { applyLook } from '../lib/look'
 import { useSetMe } from '../lib/session'
 import { setLanguage } from '../i18n'
@@ -11,7 +11,7 @@ import { LookPicker } from '../components/LookPicker'
 import { TotpPanel } from '../components/TotpPanel'
 import { AccountForm, EMPTY_ACCOUNT } from '../components/AccountForm'
 
-const TABS = ['look', 'security', 'accounts', 'invitations'] as const
+const TABS = ['look', 'security', 'accounts', 'identities', 'invitations'] as const
 type Tab = (typeof TABS)[number]
 
 export default function Settings({ me }: { me: Me }) {
@@ -38,6 +38,7 @@ export default function Settings({ me }: { me: Me }) {
       {current === 'look' && <LookTab me={me} />}
       {current === 'security' && <SecurityTab me={me} />}
       {current === 'accounts' && <AccountsTab />}
+      {current === 'identities' && <IdentitiesTab />}
       {current === 'invitations' && me.is_admin && <InvitationsTab />}
     </div>
   )
@@ -219,5 +220,98 @@ function InvitationsTab() {
         )}
       </div>
     </section>
+  )
+}
+
+/** Direcciones desde las que se escribe (la de cada cuenta y sus alias) y sus firmas. */
+function IdentitiesTab() {
+  const { t } = useTranslation()
+  const accounts = useQuery({ queryKey: ['accounts'], queryFn: api.accounts })
+  const identities = useQuery({ queryKey: ['identities'], queryFn: api.identities })
+  const [adding, setAdding] = useState<string | null>(null)
+
+  if (!accounts.data || !identities.data) return <p className="text-muted">{t('common.loading')}</p>
+  if (accounts.data.length === 0) return <Alert kind="info">{t('identity.noAccounts')}</Alert>
+
+  return (
+    <section className="flex flex-col gap-6">
+      <p className="text-muted">{t('identity.intro')}</p>
+      {accounts.data.map((a) => (
+        <div key={a.id} className="flex flex-col gap-3">
+          <h2 className="text-lg font-bold">{a.name}</h2>
+          <ul className="flex flex-col gap-3">
+            {identities.data.filter((i) => i.account_id === a.id).map((i) => (
+              <li key={i.id}><IdentityCard identity={i} /></li>
+            ))}
+          </ul>
+          {adding === a.id ? (
+            <IdentityCard account={a.id} onDone={() => setAdding(null)} />
+          ) : (
+            <button className="btn self-start" onClick={() => setAdding(a.id)}>{t('identity.add')}</button>
+          )}
+        </div>
+      ))}
+    </section>
+  )
+}
+
+function IdentityCard({ identity, account, onDone }: { identity?: Identity; account?: string; onDone?: () => void }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [value, setValue] = useState<IdentityInput>({
+    account_id: identity?.account_id ?? account,
+    name: identity?.name ?? '',
+    email: identity?.email ?? '',
+    signature: identity?.signature ?? '',
+    is_default: identity?.is_default ?? false,
+  })
+  const [done, setDone] = useState(false)
+  const refresh = () => qc.invalidateQueries({ queryKey: ['identities'] })
+  const save = useMutation({
+    mutationFn: (v: IdentityInput) => (identity ? api.updateIdentity(identity.id, v) : api.createIdentity(v)),
+    onSuccess: () => { refresh(); setDone(true); onDone?.() },
+  })
+  const remove = useMutation({ mutationFn: () => api.deleteIdentity(identity!.id), onSuccess: refresh })
+  const set = (c: Partial<IdentityInput>) => { setValue({ ...value, ...c }); setDone(false); save.reset() }
+  const sigId = `sig-${identity?.id ?? 'new'}`
+
+  return (
+    <form className="card flex flex-col gap-4 p-4" onSubmit={(e) => { e.preventDefault(); save.mutate(value) }}>
+      <div className="flex flex-wrap items-center gap-2">
+        <b className="min-w-0 flex-1 [overflow-wrap:anywhere]">{identity ? identity.email : t('identity.new')}</b>
+        {identity?.is_default && <span className="rounded bg-surface-2 px-2 py-0.5 text-xs font-semibold text-good">{t('identity.default')}</span>}
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label={t('identity.name')} value={value.name} onChange={(e) => set({ name: e.target.value })} hint={t('identity.nameHint')} />
+        <Field label={t('identity.email')} type="email" required value={value.email} onChange={(e) => set({ email: e.target.value })} />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor={sigId} className="label">{t('identity.signature')}</label>
+        <textarea id={sigId} className="input min-h-24" rows={3} value={value.signature}
+          onChange={(e) => set({ signature: e.target.value })} />
+        <p className="hint">{t('identity.signatureHint')}</p>
+      </div>
+      {!identity?.is_default && (
+        <label className="flex items-center gap-2">
+          <input type="checkbox" className="size-4 accent-[var(--accent)]" checked={value.is_default}
+            onChange={(e) => set({ is_default: e.target.checked })} />
+          {t('identity.makeDefault')}
+        </label>
+      )}
+      {save.isError && <Alert>{save.error instanceof ApiError ? save.error.message : t('common.error')}</Alert>}
+      {remove.isError && <Alert>{remove.error instanceof ApiError ? remove.error.message : t('common.error')}</Alert>}
+      {done && identity && <Alert kind="ok">{t('identity.saved')}</Alert>}
+      <div className="flex flex-wrap gap-2">
+        <button className="btn btn-primary" disabled={save.isPending}>{t('identity.save')}</button>
+        {identity ? (
+          <button type="button" className="btn btn-ghost text-crit" disabled={remove.isPending}
+            onClick={() => { if (window.confirm(t('identity.deleteConfirm', { email: identity.email }))) remove.mutate() }}>
+            {t('identity.delete')}
+          </button>
+        ) : (
+          <button type="button" className="btn btn-ghost" onClick={onDone}>{t('common.cancel')}</button>
+        )}
+      </div>
+    </form>
   )
 }
