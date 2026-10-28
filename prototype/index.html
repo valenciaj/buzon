@@ -1,0 +1,530 @@
+<title>Buzón · prototipo</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;600;700&family=Inter:wght@400;600;700&family=Source+Sans+3:wght@400;600;700&family=IBM+Plex+Sans:wght@400;600;700&family=Lexend:wght@400;600;700&display=swap">
+<style>
+/* Layout: app de tres paneles (bandejas | lista | lector) que se pliega a uno en móvil, con barra inferior al alcance del pulgar */
+:root {
+  --bg: #f4f6f8;
+  --surface: #ffffff;
+  --surface-2: #eceff3;
+  --line: #dbe0e7;
+  --fg: #18202c;
+  --muted: #586374;
+  --accent-l: #2f4fc4;
+  --accent-d: #8fa6ff;
+  --accent: var(--accent-l);
+  --on-accent: #ffffff;
+  --good: #1d7a4c;
+  --warn: #8f5b00;
+  --crit: #b42318;
+  --font: "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --pad: 1rem;
+  --row: 0.875rem;
+  --radius: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1217; --surface: #161a21; --surface-2: #1d222b; --line: #2a313c;
+    --fg: #e6e9ef; --muted: #9ba5b6; --accent: var(--accent-d); --on-accent: #0f1217;
+    --good: #5cc98f; --warn: #e3b048; --crit: #f08a80; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1217; --surface: #161a21; --surface-2: #1d222b; --line: #2a313c;
+  --fg: #e6e9ef; --muted: #9ba5b6; --accent: var(--accent-d); --on-accent: #0f1217;
+  --good: #5cc98f; --warn: #e3b048; --crit: #f08a80; color-scheme: dark;
+}
+:root[data-density="compacta"] { --pad: 0.75rem; --row: 0.55rem; }
+html, body { height: 100%; }
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--font);
+  font-size: 1rem; line-height: 1.5; -webkit-font-smoothing: antialiased;
+}
+* { box-sizing: border-box; }
+button, input, textarea, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+.app {
+  height: 100%; display: grid;
+  grid-template-columns: 15.5rem minmax(20rem, 26rem) minmax(0, 1fr);
+  padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px);
+}
+.side { background: var(--surface-2); border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 1rem; padding: 1rem 0.75rem; overflow-y: auto; min-width: 0; }
+.brand { display: flex; align-items: center; gap: 0.6rem; padding: 0 0.5rem; font-weight: 700; font-size: 1.15rem; letter-spacing: -0.01em; }
+.brand svg { color: var(--accent); flex: none; }
+.btn { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 0.5rem 0.85rem; display: inline-flex; align-items: center; gap: 0.45rem; min-height: 2.5rem; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 600; }
+.btn.ghost { background: transparent; border-color: transparent; }
+.btn.ghost:hover { background: var(--surface-2); }
+.btn.small { min-height: 2rem; padding: 0.3rem 0.65rem; font-size: 0.875rem; }
+.compose { width: 100%; justify-content: center; }
+.label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; padding: 0 0.5rem; }
+.accounts { display: flex; flex-wrap: wrap; gap: 0.35rem; padding: 0 0.25rem; }
+.chip { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 0.2rem 0.7rem; font-size: 0.875rem; display: inline-flex; align-items: center; gap: 0.4rem; }
+.chip[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; flex: none; }
+.nav { display: flex; flex-direction: column; gap: 2px; }
+.nav button { display: flex; align-items: center; gap: 0.7rem; border: 0; background: transparent; text-align: left; padding: 0.55rem 0.6rem; border-radius: 8px; width: 100%; color: var(--fg); }
+.nav button:hover { background: var(--surface); }
+.nav button[aria-current="true"] { background: var(--surface); font-weight: 600; box-shadow: inset 3px 0 0 var(--accent); }
+.nav .n { margin-left: auto; font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.nav .n.hot { color: var(--accent); font-weight: 700; }
+.nav svg { flex: none; color: var(--muted); }
+.side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 0.4rem; }
+.mode-pill { font-size: 0.8rem; color: var(--muted); padding: 0 0.5rem; }
+.mode-pill b { color: var(--fg); }
+
+.list { border-right: 1px solid var(--line); background: var(--surface); display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.list-head { padding: 0.9rem var(--pad) 0.6rem; display: flex; flex-direction: column; gap: 0.6rem; border-bottom: 1px solid var(--line); }
+.list-head .row { display: flex; align-items: center; gap: 0.5rem; }
+.list-head h1 { font-size: 1.35rem; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+.list-head p { margin: 0; color: var(--muted); font-size: 0.875rem; }
+.search { width: 100%; border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 0.5rem 0.75rem; min-height: 2.5rem; }
+.items { overflow-y: auto; flex: 1; min-height: 0; padding-bottom: 1rem; }
+.group { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; padding: 1rem var(--pad) 0.35rem; }
+.item { display: grid; grid-template-columns: 2.4rem minmax(0, 1fr) auto; gap: 0.75rem; padding: var(--row) var(--pad); border: 0; border-bottom: 1px solid var(--line); background: transparent; width: 100%; text-align: left; align-items: start; }
+.item:hover { background: var(--surface-2); }
+.item[aria-selected="true"] { background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+.avatar { width: 2.4rem; height: 2.4rem; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 0.9rem; background: var(--surface-2); color: var(--fg); position: relative; }
+.avatar .dot { position: absolute; right: -1px; bottom: -1px; border: 2px solid var(--surface); width: 0.75rem; height: 0.75rem; }
+.who { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.unread .who::before { content: ""; display: inline-block; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--accent); margin-right: 0.45rem; vertical-align: 0.1em; }
+.subj { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.unread .subj { font-weight: 600; }
+.snip { color: var(--muted); font-size: 0.9rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.meta { font-size: 0.8rem; color: var(--muted); text-align: right; white-space: nowrap; display: flex; flex-direction: column; align-items: flex-end; gap: 0.3rem; font-variant-numeric: tabular-nums; }
+.tag { font-size: 0.72rem; border-radius: 4px; padding: 0.05rem 0.4rem; background: var(--surface-2); color: var(--muted); font-weight: 600; }
+.tag.later { color: var(--warn); }
+.tag.aside { color: var(--good); }
+
+.feed { padding: 0.75rem var(--pad); display: flex; flex-direction: column; gap: 0.75rem; }
+.card { border: 1px solid var(--line); border-radius: var(--radius); padding: 1rem; background: var(--surface); text-align: left; width: 100%; display: flex; flex-direction: column; gap: 0.35rem; }
+.card:hover { border-color: var(--muted); }
+.card .src { font-size: 0.8rem; color: var(--muted); font-weight: 600; display: flex; gap: 0.5rem; align-items: center; }
+.card h3 { margin: 0; font-size: 1.05rem; text-wrap: balance; }
+.card p { margin: 0; color: var(--muted); font-size: 0.92rem; }
+
+.receipt { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.15rem 1rem; padding: var(--row) var(--pad); border: 0; border-bottom: 1px solid var(--line); background: transparent; width: 100%; text-align: left; }
+.receipt:hover { background: var(--surface-2); }
+.receipt .amt { font-variant-numeric: tabular-nums; font-weight: 700; text-align: right; }
+.receipt .sub { color: var(--muted); font-size: 0.85rem; }
+
+.screen { padding: var(--row) var(--pad); border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 0.6rem; }
+.screen .top { display: flex; gap: 0.75rem; align-items: center; min-width: 0; }
+.screen .top > div { min-width: 0; }
+.screen .addr { font-size: 0.85rem; color: var(--muted); overflow-wrap: anywhere; }
+.screen .q { font-size: 0.9rem; }
+.screen .acts { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.btn.yes { border-color: color-mix(in srgb, var(--good) 50%, var(--line)); }
+.btn.no { color: var(--crit); }
+.intro { margin: 0.75rem var(--pad) 0; padding: 0.75rem 0.9rem; border-radius: var(--radius); background: var(--surface-2); font-size: 0.9rem; color: var(--muted); }
+
+.empty { padding: 3rem var(--pad); text-align: center; color: var(--muted); }
+.empty b { display: block; color: var(--fg); font-size: 1.05rem; margin-bottom: 0.25rem; }
+
+.reader { min-width: 0; min-height: 0; overflow-y: auto; background: var(--bg); }
+.reader-inner { max-width: 44rem; margin: 0 auto; padding: 1.25rem 1.5rem 3rem; display: flex; flex-direction: column; gap: 1rem; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 0.4rem; position: sticky; top: 0; background: var(--bg); padding: 0.75rem 0; z-index: 2; border-bottom: 1px solid var(--line); }
+.reader h2 { font-size: 1.6rem; line-height: 1.25; margin: 0.25rem 0 0; text-wrap: balance; letter-spacing: -0.01em; }
+.from { display: flex; gap: 0.75rem; align-items: center; }
+.from .addr { color: var(--muted); font-size: 0.875rem; overflow-wrap: anywhere; }
+.from .when { margin-left: auto; color: var(--muted); font-size: 0.875rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.notice { display: flex; gap: 0.6rem; align-items: flex-start; font-size: 0.875rem; padding: 0.6rem 0.8rem; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--good) 40%, var(--line)); color: var(--fg); background: color-mix(in srgb, var(--good) 8%, var(--surface)); }
+.notice svg { color: var(--good); flex: none; margin-top: 0.15rem; }
+.body { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 1.25rem 1.4rem; max-width: 70ch; }
+.body p { margin: 0 0 0.9em; }
+.body p:last-child { margin-bottom: 0; }
+.attach { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.file { border: 1px solid var(--line); border-radius: 8px; padding: 0.45rem 0.7rem; font-size: 0.875rem; background: var(--surface); display: flex; gap: 0.5rem; align-items: center; }
+.file small { color: var(--muted); }
+.note label { font-size: 0.8rem; font-weight: 600; color: var(--muted); display: block; margin-bottom: 0.3rem; }
+.note textarea { width: 100%; min-height: 4.5rem; border: 1px dashed var(--line); border-radius: 8px; background: color-mix(in srgb, var(--warn) 6%, var(--surface)); padding: 0.6rem 0.75rem; resize: vertical; }
+.back { display: none; }
+
+.tabbar { display: none; }
+.menu-btn { display: none; }
+
+/* overlays */
+.overlay { position: fixed; inset: 0; background: color-mix(in srgb, #000 40%, transparent); display: grid; place-items: center; z-index: 20; padding: 1rem; }
+.sheet { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; width: min(40rem, 100%); max-height: 100%; overflow-y: auto; display: flex; flex-direction: column; }
+.sheet-head { display: flex; align-items: center; gap: 0.5rem; padding: 0.9rem 1.1rem; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--surface); z-index: 1; }
+.sheet-head h2 { margin: 0; font-size: 1.15rem; flex: 1; }
+.sheet-body { padding: 1.1rem; display: flex; flex-direction: column; gap: 1.25rem; }
+.field { display: flex; flex-direction: column; gap: 0.35rem; }
+.field > span { font-size: 0.85rem; font-weight: 600; }
+.field small { color: var(--muted); font-size: 0.8rem; }
+.input { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 0.55rem 0.75rem; min-height: 2.5rem; width: 100%; }
+textarea.input { min-height: 12rem; resize: vertical; line-height: 1.55; }
+.seg { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.seg button { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 0.45rem 0.8rem; min-height: 2.5rem; }
+.seg button[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface)); font-weight: 600; }
+.swatches { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.swatch { width: 2.25rem; height: 2.25rem; border-radius: 50%; border: 2px solid var(--surface); box-shadow: 0 0 0 1px var(--line); }
+.swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--fg); }
+.range { display: flex; align-items: center; gap: 0.75rem; }
+.range input { flex: 1; accent-color: var(--accent); }
+.range output { font-variant-numeric: tabular-nums; min-width: 3.5rem; text-align: right; font-weight: 600; }
+.preview { border: 1px solid var(--line); border-radius: 8px; padding: 0.75rem 0.9rem; background: var(--bg); }
+.sheet-foot { display: flex; gap: 0.5rem; justify-content: flex-end; padding: 0.9rem 1.1rem; border-top: 1px solid var(--line); }
+.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px)); background: var(--fg); color: var(--bg); padding: 0.6rem 1rem; border-radius: 8px; font-size: 0.9rem; z-index: 30; max-width: calc(100% - 2rem); }
+.proto { font-size: 0.75rem; color: var(--muted); padding: 0 0.5rem; }
+
+/* tableta: la barra lateral pasa a cajón */
+@media (max-width: 1024px) {
+  .app { grid-template-columns: minmax(18rem, 22rem) minmax(0, 1fr); }
+  .side { position: fixed; inset: 0 auto 0 0; width: min(18rem, 85vw); z-index: 15; transform: translateX(-100%); transition: transform 0.15s ease; padding-top: calc(1rem + env(safe-area-inset-top, 0px)); padding-left: max(0.75rem, env(safe-area-inset-left, 0px)); }
+  .app[data-drawer="open"] .side { transform: none; box-shadow: 0 0 0 100vmax color-mix(in srgb, #000 35%, transparent); }
+  .menu-btn { display: inline-flex; }
+}
+/* móvil: un panel cada vez y barra inferior */
+@media (max-width: 640px) {
+  .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; padding: 0; }
+  .list, .reader { grid-row: 1; grid-column: 1; border-right: 0; }
+  .app[data-pane="list"] .reader { display: none; }
+  .app[data-pane="reader"] .list { display: none; }
+  .list-head, .item, .receipt, .screen, .group, .feed { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .reader-inner { padding: 0 max(16px, env(safe-area-inset-right, 0px)) 2rem max(16px, env(safe-area-inset-left, 0px)); }
+  .back { display: inline-flex; }
+  .body { padding: 1rem; }
+  .reader h2 { font-size: 1.35rem; }
+  .from .when { display: none; }
+  .tabbar { display: flex; grid-row: 2; background: var(--surface); border-top: 1px solid var(--line); padding: 0.25rem max(8px, env(safe-area-inset-right, 0px)) calc(0.25rem + env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px)); }
+  .tabbar button { flex: 1; border: 0; background: transparent; display: flex; flex-direction: column; align-items: center; gap: 0.1rem; font-size: 0.72rem; padding: 0.35rem 0.1rem; min-height: 3rem; color: var(--muted); position: relative; }
+  .tabbar button[aria-current="true"] { color: var(--accent); font-weight: 700; }
+  .tabbar .badge { position: absolute; top: 0.2rem; left: calc(50% + 0.5rem); background: var(--accent); color: var(--on-accent); border-radius: 999px; font-size: 0.65rem; padding: 0 0.3rem; font-weight: 700; }
+  .overlay { padding: 0; place-items: stretch; }
+  .sheet { border-radius: 0; width: 100%; border: 0; padding-top: env(safe-area-inset-top, 0px); }
+  .sheet-head, .sheet-body, .sheet-foot { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .sheet-foot { padding-bottom: calc(0.9rem + env(safe-area-inset-bottom, 0px)); }
+  .toast { bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px)); }
+}
+</style>
+
+<div class="app" id="app" data-pane="list">
+  <aside class="side" id="side" aria-label="Bandejas"></aside>
+  <section class="list" id="list" aria-label="Mensajes"></section>
+  <main class="reader" id="reader" aria-label="Lector"></main>
+  <nav class="tabbar" id="tabbar" aria-label="Navegación principal"></nav>
+</div>
+<div id="layer"></div>
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script>
+const I = {
+  mail: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3.5 7l8.5 6 8.5-6"/></svg>',
+  home: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13l2-8h12l2 8v6H4z"/><path d="M4 13h5l1 2h4l1-2h5"/></svg>',
+  feed: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>',
+  receipt: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg>',
+  later: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 016 6v4"/></svg>',
+  aside: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-6-4-6 4z"/></svg>',
+  screen: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="8" r="4"/><path d="M3 20c0-3.5 3-6 7-6 1.4 0 2.6.3 3.7.8"/><path d="M16 18l2 2 4-4"/></svg>',
+  sent: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 3L10 14"/><path d="M21 3l-7 18-4-7-7-4z"/></svg>',
+  inbox: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13l2-8h12l2 8v6H4z"/><path d="M4 13h5l1 2h4l1-2h5"/></svg>',
+  archive: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11h14V8M10 12h4"/></svg>',
+  spam: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>',
+  draft: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>',
+  gear: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg>',
+  pen: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>',
+  menu: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>',
+  back: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
+  shield: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg>',
+  clip: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11l-8.5 8.5a5 5 0 01-7-7L14 4a3.5 3.5 0 015 5l-8.5 8.5a2 2 0 01-3-3L15 7"/></svg>',
+  x: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  more: '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>'
+};
+
+const ACC = {
+  p: { name: 'Personal', addr: 'javier@ejemplo.es', color: '#2f9a72' },
+  t: { name: 'Trabajo', addr: 'javier@estudio-ejemplo.com', color: '#c4683a' }
+};
+
+const MSGS = [
+  { id: 1, acc: 'p', box: 'principal', from: 'Lucía Ortega', email: 'lucia.ortega@ejemplo.es', subject: 'Cena del sábado', snip: 'Al final somos ocho. ¿Te encargas tú del vino? Yo llevo el postre y Dani trae la ensalada.', body: ['¡Hola!', 'Al final somos ocho para el sábado. ¿Te encargas tú del vino? Yo llevo el postre y Dani trae la ensalada.', 'Quedamos a las 21:00 en casa de Marta. Si llegas antes, avisa y te abro.', 'Un abrazo,\nLucía'], when: '10:42', day: 'Hoy', unread: true, seen: false },
+  { id: 2, acc: 't', box: 'principal', from: 'Marcos Gil', email: 'marcos@reformas-ejemplo.com', subject: 'Presupuesto reforma de la oficina, versión 3', snip: 'Te adjunto la versión 3 con los cambios en la zona de reuniones. El total baja a 18.400 €.', body: ['Hola Javier:', 'Te adjunto la versión 3 del presupuesto con los cambios que comentamos en la zona de reuniones. Quitamos la mampara de vidrio y usamos panel acústico.', 'El total baja a 18.400 € (IVA no incluido). Si te encaja, podemos empezar el 17 de noviembre.', 'Saludos,\nMarcos'], when: '09:15', day: 'Hoy', unread: true, seen: false, files: [['presupuesto-v3.pdf', '312 KB'], ['plano-planta.png', '1,2 MB']] },
+  { id: 3, acc: 't', box: 'principal', from: 'Ana Belén Ruiz', email: 'abruiz@cliente-ejemplo.com', subject: '¿Movemos la reunión al jueves?', snip: 'El miércoles se me complica. ¿Te va bien el jueves a las 11:30?', body: ['Hola Javier,', 'El miércoles se me complica por un viaje. ¿Te va bien el jueves a las 11:30, en vuestra oficina?', 'Gracias,\nAna Belén'], when: 'Ayer', day: 'Ayer', unread: false, seen: true, later: true },
+  { id: 4, acc: 'p', box: 'principal', from: 'Papá', email: 'antonio.valencia@ejemplo.es', subject: 'Fotos de Asturias', snip: 'Ya están todas en la carpeta compartida. Mira la del faro de Cabo Peñas.', body: ['Hijo:', 'Ya he subido todas las fotos del viaje a la carpeta compartida. Mira la del faro de Cabo Peñas, que salió muy bien.', 'Besos.'], when: 'Lun', day: 'Lunes', unread: false, seen: true },
+  { id: 5, acc: 't', box: 'principal', from: 'Rafa Domínguez', email: 'rafa@mantenimiento-ejemplo.com', subject: 'Contrato de mantenimiento 2027', snip: 'Te paso el borrador del contrato. Cambia la cláusula 4 sobre tiempos de respuesta.', body: ['Buenas Javier,', 'Te paso el borrador del contrato de mantenimiento para 2027. El único cambio relevante está en la cláusula 4: el tiempo de respuesta pasa de 48 a 24 horas laborables.', 'Cuando lo revises me dices.', 'Rafa'], when: '24 oct', day: '24 oct', unread: false, seen: true, aside: true, files: [['contrato-2027-borrador.pdf', '188 KB']] },
+  { id: 6, acc: 'p', box: 'novedades', from: 'Diario del Código', email: 'boletin@diariodelcodigo.example', subject: 'Async en Rust: lo nuevo de este otoño', snip: 'Repasamos los cambios en traits asíncronos, cierres async y cómo afectan a Tokio y Axum.', body: ['Esta semana repasamos los cambios en traits asíncronos y cierres async, y cómo afectan a librerías como Tokio y Axum.', 'Además: una guía corta para migrar un servidor HTTP sin cambiar su API pública.'], when: '08:00', day: 'Hoy', unread: true, seen: false, tracker: 'Diario del Código usa un píxel de seguimiento de su proveedor de envíos.' },
+  { id: 7, acc: 'p', box: 'novedades', from: 'Huerta Urbana', email: 'hola@huertaurbana.example', subject: 'Qué plantar en noviembre', snip: 'Habas, ajos y espinacas: lo que mejor aguanta el frío en un balcón orientado al sur.', body: ['Noviembre es buen mes para habas, ajos y espinacas. Aguantan bien el frío, incluso en un balcón.', 'Si tu balcón da al sur, prueba también con lechugas de hoja de roble.'], when: 'Ayer', day: 'Ayer', unread: false, seen: true },
+  { id: 8, acc: 't', box: 'novedades', from: 'Producto Semanal', email: 'semanal@producto.example', subject: 'Cinco lecturas sobre diseño de interfaces', snip: 'Densidad sin ruido, tipografía para leer en pantalla y por qué menos opciones venden más.', body: ['Cinco lecturas de esta semana: densidad sin ruido, tipografía para leer en pantalla, estados vacíos que enseñan, formularios cortos y por qué menos opciones venden más.'], when: 'Mar', day: 'Martes', unread: false, seen: true, tracker: 'Producto Semanal incluía 2 píxeles de seguimiento.' },
+  { id: 9, acc: 'p', box: 'recibos', from: 'Eléctrica del Levante', email: 'facturas@electrica.example', subject: 'Tu factura de octubre', snip: 'Factura F-2026-10-55821 · cargo en cuenta el 5 de noviembre.', body: ['Ya tienes disponible tu factura de octubre: F-2026-10-55821.', 'Importe: 64,20 €. Se cargará en tu cuenta el 5 de noviembre.'], when: '27 oct', day: '27 oct', unread: false, seen: true, amount: '64,20 €' },
+  { id: 10, acc: 't', box: 'recibos', from: 'Hosting Norte', email: 'cobros@hostingnorte.example', subject: 'Renovación del dominio estudio-ejemplo.com', snip: 'Renovado hasta el 28/10/2027.', body: ['Hemos renovado el dominio estudio-ejemplo.com hasta el 28/10/2027.', 'Importe: 14,99 €.'], when: '26 oct', day: '26 oct', unread: false, seen: true, amount: '14,99 €' },
+  { id: 11, acc: 'p', box: 'recibos', from: 'Librería Tipos', email: 'pedidos@libreriatipos.example', subject: 'Tu pedido 48213 ha salido', snip: 'Llega entre el jueves y el viernes.', body: ['Tu pedido 48213 ya está en camino. Llegará entre el jueves y el viernes.', 'Importe: 32,50 €.'], when: '22 oct', day: '22 oct', unread: false, seen: true, amount: '32,50 €' },
+  { id: 12, acc: 'p', box: 'screener', from: 'Inmobiliaria Sol y Mar', email: 'ofertas@solymar.example', subject: 'Oportunidad única en primera línea', snip: 'Apartamentos con vistas al mar desde 189.000 €.', body: ['Apartamentos con vistas al mar desde 189.000 €. ¡Últimas unidades!'], when: '11:20', day: 'Hoy', unread: true, seen: false },
+  { id: 13, acc: 't', box: 'screener', from: 'Clara Méndez', email: 'clara.mendez@agencia-ejemplo.com', subject: 'Propuesta de colaboración', snip: 'Hola Javier, me han hablado muy bien de vuestro estudio y me gustaría proponeros…', body: ['Hola Javier, me han hablado muy bien de vuestro estudio y me gustaría proponeros un proyecto conjunto para el primer trimestre.'], when: 'Ayer', day: 'Ayer', unread: true, seen: false },
+  { id: 14, acc: 'p', box: 'screener', from: 'Club de Pádel Las Lomas', email: 'info@padellaslomas.example', subject: 'Bienvenida a la temporada', snip: 'Ya puedes reservar pista desde la app del club.', body: ['¡Bienvenido a la temporada! Ya puedes reservar pista desde la web del club.'], when: 'Lun', day: 'Lunes', unread: true, seen: false },
+  { id: 15, acc: 't', box: 'enviados', from: 'Para: Marcos Gil', email: 'marcos@reformas-ejemplo.com', subject: 'Re: Presupuesto reforma de la oficina', snip: 'Gracias, Marcos. Lo revisamos y te digo algo antes del viernes.', body: ['Gracias, Marcos. Lo revisamos y te digo algo antes del viernes.'], when: 'Ayer', day: 'Ayer', unread: false, seen: true }
+];
+
+const ACCENTS = [['Tinta', '#2f4fc4', '#8fa6ff'], ['Pino', '#1f7a5a', '#6fd3a8'], ['Teja', '#b4532a', '#f0a07a'], ['Ciruela', '#7a3fa0', '#cfa2ee'], ['Pizarra', '#3d5566', '#9db8cb'], ['Mostaza', '#8a6a00', '#e6c25a']];
+const FONTS = [['Atkinson Hyperlegible Next', '"Atkinson Hyperlegible Next", system-ui, sans-serif', 'Por defecto · máxima legibilidad'], ['Inter', '"Inter", system-ui, sans-serif', ''], ['Source Sans 3', '"Source Sans 3", system-ui, sans-serif', ''], ['IBM Plex Sans', '"IBM Plex Sans", system-ui, sans-serif', ''], ['Lexend', '"Lexend", system-ui, sans-serif', 'Pensada para lectura fluida'], ['Sistema', 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif', 'La fuente de tu dispositivo']];
+
+const S = { mode: 'enfoque', view: 'unificada', acc: 'p', box: 'principal', sel: null, theme: 'sistema', accent: 0, font: 0, size: 100, density: 'comoda', q: '', notes: {} };
+try { Object.assign(S, JSON.parse(localStorage.getItem('buzon-proto') || '{}'), { sel: null, q: '' }); } catch (e) {}
+const save = () => { try { const { sel, q, ...rest } = S; localStorage.setItem('buzon-proto', JSON.stringify(rest)); } catch (e) {} };
+
+const $ = id => document.getElementById(id);
+const initials = n => n.replace(/^Para: /, '').split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+const inScope = m => S.view === 'unificada' || m.acc === S.acc;
+
+const BOXES = {
+  enfoque: [
+    ['principal', 'Principal', I.home, 'Correo de personas que te importan.'],
+    ['novedades', 'Novedades', I.feed, 'Boletines y avisos para leer como un periódico, sin prisa.'],
+    ['recibos', 'Recibos', I.receipt, 'Facturas, pedidos y envíos, sin ruido.'],
+    ['later', 'Responder luego', I.later, 'Lo que tienes pendiente de contestar.'],
+    ['aside', 'Apartados', I.aside, 'Correos que quieres tener a mano.'],
+    ['screener', 'Por aprobar', I.screen, 'Remitentes nuevos. Tú decides si pueden escribirte.'],
+    ['enviados', 'Enviados', I.sent, '']
+  ],
+  clasico: [
+    ['entrada', 'Entrada', I.inbox, ''],
+    ['enviados', 'Enviados', I.sent, ''],
+    ['borradores', 'Borradores', I.draft, ''],
+    ['archivo', 'Archivo', I.archive, ''],
+    ['spam', 'Spam', I.spam, '']
+  ]
+};
+
+function msgsFor(box) {
+  let r = MSGS.filter(inScope);
+  if (box === 'entrada') r = r.filter(m => m.box !== 'enviados' && m.box !== 'archivo');
+  else if (box === 'later') r = r.filter(m => m.later);
+  else if (box === 'aside') r = r.filter(m => m.aside);
+  else r = r.filter(m => m.box === box);
+  if (S.q) { const q = S.q.toLowerCase(); r = r.filter(m => (m.from + ' ' + m.subject + ' ' + m.snip).toLowerCase().includes(q)); }
+  return r;
+}
+function count(box) {
+  const r = msgsFor(box);
+  if (box === 'later' || box === 'aside' || box === 'screener') return r.length;
+  return r.filter(m => m.unread).length;
+}
+
+function applyLook() {
+  const root = document.documentElement;
+  if (S.theme === 'claro') root.dataset.theme = 'light';
+  else if (S.theme === 'oscuro') root.dataset.theme = 'dark';
+  else delete root.dataset.theme;
+  const a = ACCENTS[S.accent] || ACCENTS[0];
+  root.style.setProperty('--accent-l', a[1]);
+  root.style.setProperty('--accent-d', a[2]);
+  root.style.setProperty('--font', (FONTS[S.font] || FONTS[0])[1]);
+  root.style.fontSize = S.size + '%';
+  root.dataset.density = S.density;
+}
+
+function renderSide() {
+  const boxes = BOXES[S.mode];
+  $('side').innerHTML = `
+    <div class="brand">${I.mail}<span>Buzón</span></div>
+    <button class="btn primary compose" data-act="compose">${I.pen} Redactar</button>
+    <div style="display:flex;flex-direction:column;gap:.45rem">
+      <div class="label">Cuentas</div>
+      <div class="accounts">
+        <button class="chip" aria-pressed="${S.view === 'unificada'}" data-view="unificada">Todas</button>
+        ${Object.entries(ACC).map(([k, a]) => `<button class="chip" aria-pressed="${S.view === 'cuenta' && S.acc === k}" data-acc="${k}"><span class="dot" style="background:${a.color}"></span>${a.name}</button>`).join('')}
+      </div>
+    </div>
+    <div class="nav" role="list">
+      ${boxes.map(([k, name, ic]) => { const n = count(k); const hot = (k === 'screener' || k === 'principal' || k === 'entrada') && n; return `<button role="listitem" data-box="${k}" aria-current="${S.box === k}">${ic}<span>${name}</span>${n ? `<span class="n ${hot ? 'hot' : ''}">${n}</span>` : ''}</button>`; }).join('')}
+    </div>
+    <div class="side-foot">
+      <div class="mode-pill">Modo <b>${S.mode === 'enfoque' ? 'Enfoque' : 'Clásico'}</b> · vista <b>${S.view === 'unificada' ? 'unificada' : ACC[S.acc].name}</b></div>
+      <div class="nav"><button data-act="settings">${I.gear}<span>Ajustes</span></button></div>
+      <div class="proto">Prototipo con datos de ejemplo. Nada se envía.</div>
+    </div>`;
+}
+
+function itemRow(m) {
+  const a = ACC[m.acc];
+  return `<button class="item ${m.unread ? 'unread' : ''}" data-open="${m.id}" aria-selected="${S.sel === m.id}">
+    <span class="avatar">${initials(m.from)}${S.view === 'unificada' ? `<span class="dot" style="background:${a.color}" title="${a.name}"></span>` : ''}</span>
+    <span style="min-width:0;display:flex;flex-direction:column;gap:.1rem">
+      <span class="who">${m.from}</span>
+      <span class="subj">${m.subject}</span>
+      <span class="snip">${m.snip}</span>
+    </span>
+    <span class="meta"><span>${m.when}</span>${m.later ? '<span class="tag later">Responder</span>' : ''}${m.aside ? '<span class="tag aside">Apartado</span>' : ''}${m.files ? `<span title="Adjuntos" style="color:var(--muted)">${I.clip}</span>` : ''}</span>
+  </button>`;
+}
+
+function renderList() {
+  const box = BOXES[S.mode].find(b => b[0] === S.box) || BOXES[S.mode][0];
+  const ms = msgsFor(box[0]);
+  let content = '';
+  if (!ms.length) {
+    const empty = { later: ['Nada pendiente', 'Marca un correo con «Responder luego» para verlo aquí.'], aside: ['Nada apartado', 'Aparta un correo para tenerlo a mano.'], screener: ['Todo revisado', 'Cuando te escriba alguien nuevo, aparecerá aquí.'], spam: ['Sin spam', 'Buzón no ha encontrado correo no deseado.'], borradores: ['Sin borradores', 'Los correos a medias se guardan aquí solos.'], archivo: ['Archivo vacío', 'Lo que archives queda aquí.'] }[box[0]] || ['Sin correos', S.q ? 'Ningún correo coincide con la búsqueda.' : 'No hay nada aquí.'];
+    content = `<div class="empty"><b>${empty[0]}</b>${empty[1]}</div>`;
+  } else if (box[0] === 'novedades') {
+    content = `<div class="feed">${ms.map(m => `<button class="card" data-open="${m.id}"><span class="src">${S.view === 'unificada' ? `<span class="dot" style="background:${ACC[m.acc].color}"></span>` : ''}${m.from} · ${m.when}</span><h3>${m.subject}</h3><p>${m.snip}</p></button>`).join('')}</div>`;
+  } else if (box[0] === 'recibos') {
+    content = ms.map(m => `<button class="receipt" data-open="${m.id}"><span class="who">${m.from}</span><span class="amt">${m.amount || ''}</span><span class="sub">${m.subject}</span><span class="sub" style="text-align:right">${m.when}</span></button>`).join('');
+  } else if (box[0] === 'screener') {
+    content = `<div class="intro">Es la primera vez que te escriben. Si dices que no, no volverás a ver sus correos.</div>` + ms.map(m => `<div class="screen">
+      <div class="top"><span class="avatar">${initials(m.from)}</span><div><div class="who">${m.from}</div><div class="addr">${m.email}</div></div></div>
+      <div class="q"><b>${m.subject}</b> · <span style="color:var(--muted)">${m.snip}</span></div>
+      <div class="acts">
+        <button class="btn small yes" data-screen="${m.id}" data-to="principal">Sí, a Principal</button>
+        <button class="btn small" data-screen="${m.id}" data-to="novedades">A Novedades</button>
+        <button class="btn small" data-screen="${m.id}" data-to="recibos">A Recibos</button>
+        <button class="btn small ghost no" data-screen="${m.id}" data-to="no">No</button>
+      </div></div>`).join('');
+  } else if (box[0] === 'principal') {
+    const fresh = ms.filter(m => !m.seen), old = ms.filter(m => m.seen);
+    content = (fresh.length ? `<div class="group">Nuevo para ti</div>${fresh.map(itemRow).join('')}` : '') + (old.length ? `<div class="group">Ya visto</div>${old.map(itemRow).join('')}` : '');
+  } else {
+    content = ms.map(itemRow).join('');
+  }
+  $('list').innerHTML = `
+    <div class="list-head">
+      <div class="row">
+        <button class="btn ghost small menu-btn" data-act="drawer" aria-label="Abrir menú">${I.menu}</button>
+        <h1>${box[1]}</h1>
+        <span style="margin-left:auto;display:flex;gap:.25rem">
+          <button class="btn ghost small menu-btn" data-act="compose" aria-label="Redactar">${I.pen}</button>
+        </span>
+      </div>
+      ${box[3] ? `<p>${box[3]}</p>` : ''}
+      <input class="search" id="search" type="search" placeholder="Buscar en ${S.view === 'unificada' ? 'todas las cuentas' : ACC[S.acc].name}" value="${S.q}" aria-label="Buscar">
+    </div>
+    <div class="items">${content}</div>`;
+}
+
+function renderReader() {
+  const m = MSGS.find(x => x.id === S.sel);
+  if (!m) {
+    $('reader').innerHTML = `<div class="empty" style="padding-top:6rem"><b>Elige un correo</b>Pulsa <kbd>c</kbd> para redactar o <kbd>/</kbd> para buscar.</div>`;
+    return;
+  }
+  const a = ACC[m.acc];
+  $('reader').innerHTML = `<div class="reader-inner">
+    <div class="toolbar">
+      <button class="btn small back" data-act="back">${I.back} Volver</button>
+      <button class="btn small" data-act="reply">Responder</button>
+      ${S.mode === 'enfoque' ? `<button class="btn small" data-act="later" aria-pressed="${!!m.later}">${I.later} ${m.later ? 'Quitar de pendientes' : 'Responder luego'}</button>
+      <button class="btn small" data-act="aside">${I.aside} ${m.aside ? 'Quitar de apartados' : 'Apartar'}</button>
+      <button class="btn small" data-act="bubble">Reaparecer el lunes</button>` : ''}
+      <button class="btn small" data-act="archive">${I.archive} Archivar</button>
+    </div>
+    <h2>${m.subject}</h2>
+    <div class="from"><span class="avatar">${initials(m.from)}</span><div style="min-width:0"><div class="who">${m.from}</div><div class="addr">${m.email} → <span style="color:${a.color};font-weight:600">${a.name}</span></div></div><span class="when">${m.day}, ${m.when.includes(':') ? m.when : '09:30'}</span></div>
+    ${m.tracker ? `<div class="notice">${I.shield}<span><b>Rastreador bloqueado.</b> ${m.tracker}</span></div>` : ''}
+    <article class="body">${m.body.map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('')}</article>
+    ${m.files ? `<div class="attach">${m.files.map(f => `<span class="file">${I.clip}${f[0]} <small>${f[1]}</small></span>`).join('')}</div>` : ''}
+    <div class="note"><label for="note-${m.id}">Nota privada (solo la ves tú)</label><textarea id="note-${m.id}" data-note="${m.id}" placeholder="Por ejemplo: confirmar con Marta antes de contestar">${S.notes[m.id] || ''}</textarea></div>
+  </div>`;
+}
+
+function renderTabbar() {
+  const tabs = S.mode === 'enfoque'
+    ? [['principal', 'Principal', I.home], ['novedades', 'Novedades', I.feed], ['recibos', 'Recibos', I.receipt], ['screener', 'Aprobar', I.screen]]
+    : [['entrada', 'Entrada', I.inbox], ['enviados', 'Enviados', I.sent], ['archivo', 'Archivo', I.archive]];
+  $('tabbar').innerHTML = tabs.map(([k, n, ic]) => { const c = k === 'screener' || k === 'principal' || k === 'entrada' ? count(k) : 0; return `<button data-box="${k}" aria-current="${S.box === k}">${ic}<span>${n}</span>${c ? `<span class="badge">${c}</span>` : ''}</button>`; }).join('') + `<button data-act="drawer">${I.more}<span>Más</span></button>`;
+}
+
+function render() { applyLook(); renderSide(); renderList(); renderReader(); renderTabbar(); }
+
+let toastT;
+function toast(t) { const el = $('toast'); el.textContent = t; el.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => el.hidden = true, 2600); }
+
+function seg(name, opts, cur) { return `<div class="seg" role="group">${opts.map(([v, l]) => `<button data-set="${name}" data-val="${v}" aria-pressed="${String(cur) === String(v)}">${l}</button>`).join('')}</div>`; }
+
+function openSettings() {
+  $('layer').innerHTML = `<div class="overlay" data-close="1"><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="st-title">
+    <div class="sheet-head"><h2 id="st-title">Ajustes</h2><button class="btn ghost small" data-act="close" aria-label="Cerrar">${I.x}</button></div>
+    <div class="sheet-body">
+      <div class="field"><span>Modo de trabajo</span>${seg('mode', [['enfoque', 'Enfoque'], ['clasico', 'Clásico']], S.mode)}<small>Enfoque filtra remitentes nuevos y separa Principal, Novedades y Recibos. Clásico muestra las carpetas de siempre. Cambiar no borra nada.</small></div>
+      <div class="field"><span>Vista de cuentas</span>${seg('view', [['unificada', 'Unificada'], ['cuenta', 'Por cuenta']], S.view)}<small>Unificada junta todas las cuentas, con un color por cuenta.</small></div>
+      <div class="field"><span>Tema</span>${seg('theme', [['sistema', 'Como el sistema'], ['claro', 'Claro'], ['oscuro', 'Oscuro']], S.theme)}</div>
+      <div class="field"><span>Color de acento</span><div class="swatches">${ACCENTS.map((a, i) => `<button class="swatch" style="background:${a[1]}" data-set="accent" data-val="${i}" aria-pressed="${S.accent === i}" aria-label="${a[0]}" title="${a[0]}"></button>`).join('')}</div></div>
+      <div class="field"><label for="font-sel"><span style="font-size:.85rem;font-weight:600">Fuente</span></label><select class="input" id="font-sel">${FONTS.map((f, i) => `<option value="${i}" ${S.font === i ? 'selected' : ''}>${f[0]}${f[2] ? ' · ' + f[2] : ''}</option>`).join('')}</select></div>
+      <div class="field"><label for="size-range"><span style="font-size:.85rem;font-weight:600">Tamaño del texto</span></label><div class="range"><input type="range" id="size-range" min="87.5" max="150" step="12.5" value="${S.size}"><output id="size-out">${String(S.size).replace('.', ',')} %</output></div>
+        <div class="preview">Al final somos ocho para el sábado. ¿Te encargas tú del vino? Il1 O0 rn m</div></div>
+      <div class="field"><span>Densidad</span>${seg('density', [['comoda', 'Cómoda'], ['compacta', 'Compacta']], S.density)}<small>Compacta reduce márgenes, nunca el tamaño del texto.</small></div>
+      <div class="field"><span>Idioma</span>${seg('lang', [['es', 'Español'], ['en', 'English']], 'es')}<small>En el prototipo solo está el español; la app tendrá español e inglés.</small></div>
+    </div></div></div>`;
+}
+
+function openCompose(reply) {
+  const m = reply ? MSGS.find(x => x.id === S.sel) : null;
+  const acc = m ? m.acc : (S.view === 'cuenta' ? S.acc : 'p');
+  $('layer').innerHTML = `<div class="overlay" data-close="1"><form class="sheet" id="compose-form" role="dialog" aria-modal="true" aria-labelledby="cp-title">
+    <div class="sheet-head"><h2 id="cp-title">${m ? 'Responder' : 'Nuevo correo'}</h2><button type="button" class="btn ghost small" data-act="close" aria-label="Cerrar">${I.x}</button></div>
+    <div class="sheet-body" style="gap:.75rem">
+      <label class="field"><span>Desde</span><select class="input" id="cp-from">${Object.entries(ACC).map(([k, a]) => `<option value="${k}" ${k === acc ? 'selected' : ''}>${a.name} · ${a.addr}</option>`).join('')}</select></label>
+      <label class="field"><span>Para</span><input class="input" id="cp-to" value="${m ? m.email : ''}" placeholder="nombre@ejemplo.es"></label>
+      <label class="field"><span>Asunto</span><input class="input" id="cp-subj" value="${m ? 'Re: ' + m.subject : ''}"></label>
+      <label class="field"><span>Mensaje</span><textarea class="input" id="cp-body" placeholder="Escribe aquí…">${m ? '\n\n— El ' + m.day.toLowerCase() + ', ' + m.from + ' escribió:\n> ' + m.body[1 < m.body.length ? 1 : 0] : ''}</textarea></label>
+    </div>
+    <div class="sheet-foot"><button type="button" class="btn ghost" data-act="close">Descartar</button><button type="button" class="btn" data-act="schedule">Programar</button><button type="submit" class="btn primary">Enviar</button></div>
+  </form></div>`;
+  setTimeout(() => (m ? $('cp-body') : $('cp-to')).focus(), 30);
+}
+const closeLayer = () => { $('layer').innerHTML = ''; };
+
+document.addEventListener('click', e => {
+  const app0 = $('app');
+  if (app0.dataset.drawer === 'open' && !e.target.closest('.side') && !e.target.closest('[data-act="drawer"]')) { app0.dataset.drawer = ''; return; }
+  const t = e.target.closest('button, .overlay');
+  if (!t) return;
+  if (t.classList.contains('overlay')) { if (e.target === t) closeLayer(); return; }
+  const app = $('app');
+  if (t.dataset.box) { S.box = t.dataset.box; S.sel = null; app.dataset.pane = 'list'; app.dataset.drawer = ''; save(); render(); return; }
+  if (t.dataset.view) { S.view = 'unificada'; save(); render(); return; }
+  if (t.dataset.acc) { S.view = 'cuenta'; S.acc = t.dataset.acc; save(); render(); return; }
+  if (t.dataset.open) { const m = MSGS.find(x => x.id === +t.dataset.open); m.unread = false; S.sel = m.id; app.dataset.pane = 'reader'; renderSide(); renderList(); renderReader(); renderTabbar(); $('reader').scrollTop = 0; return; }
+  if (t.dataset.screen) {
+    const m = MSGS.find(x => x.id === +t.dataset.screen), to = t.dataset.to;
+    if (to === 'no') { MSGS.splice(MSGS.indexOf(m), 1); toast(`${m.from} bloqueado. No verás más sus correos.`); }
+    else { m.box = to; m.seen = false; toast(`${m.from} aprobado. Sus correos irán a ${{ principal: 'Principal', novedades: 'Novedades', recibos: 'Recibos' }[to]}.`); }
+    render(); return;
+  }
+  if (t.dataset.set) {
+    const k = t.dataset.set, v = t.dataset.val;
+    if (k === 'lang') { if (v === 'en') toast('El inglés llegará en la app final.'); return; }
+    if (k === 'accent') S.accent = +v; else S[k] = v;
+    if (k === 'mode') { S.box = v === 'enfoque' ? 'principal' : 'entrada'; S.sel = null; }
+    if (k === 'view' && v === 'cuenta' && !S.acc) S.acc = 'p';
+    save(); render(); openSettings(); return;
+  }
+  const act = t.dataset.act;
+  if (!act) return;
+  const m = MSGS.find(x => x.id === S.sel);
+  if (act === 'compose') { app.dataset.drawer = ''; openCompose(false); }
+  else if (act === 'reply') openCompose(true);
+  else if (act === 'settings') { app.dataset.drawer = ''; openSettings(); }
+  else if (act === 'close') closeLayer();
+  else if (act === 'drawer') app.dataset.drawer = app.dataset.drawer === 'open' ? '' : 'open';
+  else if (act === 'back') { app.dataset.pane = 'list'; S.sel = null; renderList(); renderReader(); }
+  else if (act === 'later' && m) { m.later = !m.later; toast(m.later ? 'Añadido a Responder luego.' : 'Quitado de Responder luego.'); render(); }
+  else if (act === 'aside' && m) { m.aside = !m.aside; toast(m.aside ? 'Apartado.' : 'Quitado de Apartados.'); render(); }
+  else if (act === 'bubble' && m) toast('Volverá arriba el lunes a las 9:00.');
+  else if (act === 'archive' && m) { m.box = 'archivo'; m.later = false; m.aside = false; S.sel = null; app.dataset.pane = 'list'; toast('Archivado.'); render(); }
+  else if (act === 'schedule') toast('Se enviaría mañana a las 8:00 (prototipo).');
+});
+
+document.addEventListener('submit', e => { e.preventDefault(); closeLayer(); toast('Enviado. Es un prototipo: no ha salido ningún correo.'); });
+document.addEventListener('input', e => {
+  if (e.target.id === 'search') { S.q = e.target.value; const pos = e.target.selectionStart; renderList(); const s = $('search'); s.focus(); s.setSelectionRange(pos, pos); }
+  else if (e.target.dataset.note) S.notes[e.target.dataset.note] = e.target.value, save();
+  else if (e.target.id === 'size-range') { S.size = +e.target.value; $('size-out').textContent = String(S.size).replace('.', ',') + ' %'; applyLook(); save(); }
+});
+document.addEventListener('change', e => { if (e.target.id === 'font-sel') { S.font = +e.target.value; applyLook(); save(); } });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { if ($('layer').innerHTML) closeLayer(); else $('app').dataset.drawer = ''; return; }
+  if (/input|textarea|select/i.test(document.activeElement.tagName)) return;
+  if (e.key === 'c') { e.preventDefault(); openCompose(false); }
+  if (e.key === '/') { e.preventDefault(); $('search').focus(); }
+});
+
+if (!BOXES[S.mode].some(b => b[0] === S.box)) S.box = BOXES[S.mode][0][0];
+if (window.matchMedia('(min-width: 641px)').matches) S.sel = 2;
+render();
+</script>
