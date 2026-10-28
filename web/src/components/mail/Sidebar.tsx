@@ -1,7 +1,8 @@
 import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
-import type { Account, Mailbox, Me, Role } from '../../lib/api'
+import { api, type Account, type Mailbox, type Me, type Role } from '../../lib/api'
 import { ACCOUNT_COLORS, boxKey, customFolders, ROLE_ORDER, unreadByRole, type Box } from '../../lib/mail'
 import { Logo } from '../ui'
 import { Icon } from './Icons'
@@ -24,6 +25,7 @@ export function Sidebar({ me, accounts, mailboxes, account, box, onAccount, onBo
   const { t } = useTranslation()
   const focus = me.preferences.mode === 'focus'
   const [more, setMore] = useState(false)
+  const labels = useQuery({ queryKey: ['labels'], queryFn: api.labels })
   const unread = unreadByRole(mailboxes, account)
   const present = new Set(mailboxes.filter((m) => !account || m.account_id === account).map((m) => m.role))
   const roles = ROLE_ORDER.filter((r) => r === 'inbox' || present.has(r))
@@ -36,11 +38,13 @@ export function Sidebar({ me, accounts, mailboxes, account, box, onAccount, onBo
   const showMore = !focus || more || extraRoles.some((r) => boxKey({ role: r }) === current)
     || folders.some((f) => boxKey({ mailbox: f.id }) === current)
 
-  const item = (key: string, label: string, icon: string, count: number, onClick: () => void, dot?: string) => (
+  const item = (key: string, label: string, icon: string, count: number, onClick: () => void, dot?: string, swatch?: string) => (
     <li key={key}>
       <button aria-current={current === key} onClick={onClick}
         className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-surface ${current === key ? 'bg-surface font-semibold shadow-[inset_3px_0_0_var(--accent)]' : ''}`}>
-        <Icon name={icon} className="shrink-0 text-muted" />
+        {swatch
+          ? <span className="grid size-[18px] shrink-0 place-items-center"><span className="size-3 rounded-full" style={{ background: swatch }} /></span>
+          : <Icon name={icon} className="shrink-0 text-muted" />}
         <span className="min-w-0 flex-1 truncate">{label}</span>
         {dot && <span className="size-2 shrink-0 rounded-full" style={{ background: dot }} />}
         {count > 0 && <span className={`text-sm tabular-nums ${key === 'inbox' ? 'font-bold text-accent' : 'text-muted'}`}>{count}</span>}
@@ -94,6 +98,22 @@ export function Sidebar({ me, accounts, mailboxes, account, box, onAccount, onBo
           )}
         </div>
       )}
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center justify-between px-3">
+          <p className="eyebrow">{t('labels.title')}</p>
+          <Link to="/settings/labels" className="-mr-1 grid size-8 place-items-center rounded-md text-muted hover:bg-surface hover:text-fg"
+            title={t('labels.manage')} aria-label={t('labels.manage')}>
+            <Icon name="sliders" className="size-4" />
+          </Link>
+        </div>
+        {(labels.data ?? []).length > 0 ? (
+          <ul className="flex flex-col gap-0.5">
+            {(labels.data ?? []).map((l) => item(`l:${l.id}`, l.name, 'tag', l.unread, () => onBox({ label: l.id }), undefined, l.color))}
+          </ul>
+        ) : (
+          <Link to="/settings/labels" className="px-3 text-sm text-muted hover:text-fg">{t('labels.add')}</Link>
+        )}
+      </div>
       <div className="mt-auto flex flex-col gap-1">
         {errors.length > 0 && (
           <Link to="/settings/accounts" className="flex items-start gap-2 rounded-lg px-3 py-2 text-sm text-crit hover:bg-surface">
@@ -109,6 +129,9 @@ export function Sidebar({ me, accounts, mailboxes, account, box, onAccount, onBo
         <p className="px-3 text-sm text-muted">
           {t(`look.modes.${me.preferences.mode}`)} · {me.username}
         </p>
+        <Link to="/contacts" className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-surface">
+          <Icon name="contacts" className="shrink-0 text-muted" /> {t('home.contacts')}
+        </Link>
         <Link to="/settings" className="rounded-lg px-3 py-2 hover:bg-surface">{t('home.settings')}</Link>
         <button onClick={onLogout} className="rounded-lg px-3 py-2 text-left hover:bg-surface">{t('home.logout')}</button>
       </div>

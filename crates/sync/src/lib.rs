@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use buzon_store::mail::ImapTarget;
+use buzon_store::organize::{ExpungeOp, MoveOp};
 use buzon_store::user::{user_raw_dir, Account};
 use buzon_store::{Id, UserDb};
 use serde::Serialize;
@@ -72,6 +73,16 @@ pub(crate) enum Cmd {
     Append {
         mailbox: String,
         raw: Vec<u8>,
+    },
+    Move {
+        from: String,
+        to: String,
+        uids: Vec<u32>,
+    },
+    /// Borra mensajes para siempre.
+    Expunge {
+        mailbox: String,
+        uids: Vec<u32>,
     },
     Stop,
 }
@@ -163,7 +174,7 @@ impl SyncHub {
     /// Aplica en IMAP un cambio de flag (`\Seen`, `\Flagged`…) ya guardado en local.
     pub fn store_flag(&self, targets: &[ImapTarget], flag: &'static str, on: bool) {
         let mut groups: BTreeMap<(Id, &str), Vec<u32>> = BTreeMap::new();
-        for t in targets {
+        for t in targets.iter().filter(|t| t.uid > 0) {
             groups
                 .entry((t.account_id, t.mailbox.as_str()))
                 .or_default()
@@ -192,6 +203,41 @@ impl SyncHub {
             },
         );
         self.send(account, Cmd::SyncNow);
+    }
+
+    /// Aplica en IMAP movimientos ya hechos en local y vuelve a sincronizar para
+    /// recibir los mensajes en su nueva carpeta.
+    pub fn move_messages(&self, ops: &[MoveOp]) {
+        let mut accounts = Vec::new();
+        for op in ops.iter().filter(|o| !o.uids.is_empty()) {
+            self.send(
+                op.account_id,
+                Cmd::Move {
+                    from: op.from.clone(),
+                    to: op.to.clone(),
+                    uids: op.uids.clone(),
+                },
+            );
+            if !accounts.contains(&op.account_id) {
+                accounts.push(op.account_id);
+            }
+        }
+        for a in accounts {
+            self.send(a, Cmd::SyncNow);
+        }
+    }
+
+    /// Borra para siempre en IMAP mensajes ya borrados en local.
+    pub fn expunge(&self, ops: &[ExpungeOp]) {
+        for op in ops.iter().filter(|o| !o.uids.is_empty()) {
+            self.send(
+                op.account_id,
+                Cmd::Expunge {
+                    mailbox: op.mailbox.clone(),
+                    uids: op.uids.clone(),
+                },
+            );
+        }
     }
 
     fn send(&self, account: Id, cmd: Cmd) {

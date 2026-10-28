@@ -1,11 +1,12 @@
 //! Prueba de la sincronización completa contra un servidor IMAP de mentira, en memoria.
-//! Implementa solo lo que usa Buzón: LOGIN, LIST, SELECT, UID SEARCH/FETCH/STORE e IDLE.
+//! Implementa solo lo que usa Buzón: LOGIN, LIST, SELECT, UID SEARCH/FETCH/STORE/MOVE e IDLE.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use buzon_store::crypto::MasterKey;
 use buzon_store::mail::ThreadQuery;
+use buzon_store::organize::{Place, Rule};
 use buzon_store::user::{user_raw_dir, NewAccount};
 use buzon_store::{Id, UserDb};
 use buzon_sync::{Security, ServerConfig, State, SyncHub};
@@ -119,10 +120,10 @@ async fn client(stream: TcpStream, state: Arc<Mutex<Server>>, notify: Arc<Notify
         let mut body: Vec<u8> = Vec::new();
         let ok = format!("{tag} OK hecho\r\n");
         match cmd.as_str() {
-            "CAPABILITY" => out = format!("* CAPABILITY IMAP4rev1 IDLE\r\n{ok}"),
+            "CAPABILITY" => out = format!("* CAPABILITY IMAP4rev1 IDLE MOVE\r\n{ok}"),
             "LOGIN" => {
                 out = if parts[3] == "clave" {
-                    format!("* CAPABILITY IMAP4rev1 IDLE\r\n{ok}")
+                    format!("* CAPABILITY IMAP4rev1 IDLE MOVE\r\n{ok}")
                 } else {
                     format!("{tag} NO [AUTHENTICATIONFAILED] credenciales no válidas\r\n")
                 }
@@ -214,6 +215,22 @@ async fn client(stream: TcpStream, state: Arc<Mutex<Server>>, notify: Arc<Notify
                         }
                         out = ok.clone();
                     }
+                    "MOVE" => {
+                        let ranges = parse_set(&parts[3], max);
+                        let (moved, keep): (Vec<Msg>, Vec<Msg>) = std::mem::take(&mut f.msgs)
+                            .into_iter()
+                            .partition(|m| in_set(m.uid, &ranges));
+                        f.msgs = keep;
+                        let dest = s.folder(&parts[4]);
+                        for m in moved {
+                            dest.next_uid += 1;
+                            dest.msgs.push(Msg {
+                                uid: dest.next_uid,
+                                ..m
+                            });
+                        }
+                        out = ok.clone();
+                    }
                     _ => out = format!("{tag} BAD no soportado\r\n"),
                 }
             }
@@ -266,6 +283,13 @@ async fn fake_server() -> Fake {
         name: "Enviados",
         attrs: "\\HasNoChildren \\Sent",
         validity: 3,
+        next_uid: 0,
+        msgs: vec![],
+    });
+    s.folders.push(Folder {
+        name: "Archivo",
+        attrs: "\\HasNoChildren \\Archive",
+        validity: 5,
         next_uid: 0,
         msgs: vec![],
     });
@@ -382,7 +406,7 @@ async fn syncs_threads_flags_and_new_mail_with_idle() {
 
     let mbs = db.mailboxes(Some(account.id)).await.unwrap();
     let roles: Vec<_> = mbs.iter().map(|m| m.mailbox.role.clone()).collect();
-    assert_eq!(mbs.len(), 2, "la carpeta virtual \\All no se sincroniza");
+    assert_eq!(mbs.len(), 3, "la carpeta virtual \\All no se sincroniza");
     assert!(roles.contains(&Some("sent".into())));
 
     let t = db.thread(bank.id).await.unwrap().unwrap();
@@ -458,6 +482,72 @@ async fn syncs_threads_flags_and_new_mail_with_idle() {
     tokio::time::timeout(Duration::from_secs(10), rx.recv())
         .await
         .expect("borrado y flags sincronizados");
+
+    // Un filtro archiva y etiqueta lo que llega del banco.
+    let label = db.save_label(None, "Banco", "#3d7fb5").await.unwrap();
+    db.save_rule(&Rule {
+        name: "Banco".into(),
+        enabled: true,
+        from_has: "banco.example".into(),
+        label_id: Some(label),
+        mark_read: true,
+        move_to: "archive".into(),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    fake.state.lock().unwrap().append(
+        "INBOX",
+        "From: Banco <avisos@banco.example>\nSubject: Recibo de noviembre\nMessage-ID: <b2@banco.example>\n\nRecibo\n",
+        &[],
+    );
+    hub.sync_now(account.id);
+    let st = fake.state.clone();
+    wait_for("el filtro mueve al archivo en el servidor", || {
+        let mut s = st.lock().unwrap();
+        s.folder("Archivo")
+            .msgs
+            .iter()
+            .any(|m| m.flags.contains(&"\\Seen".to_string()))
+            && s.folder("INBOX").msgs.len() == 3
+    })
+    .await;
+    let archived = ThreadQuery {
+        role: Some("archive".into()),
+        limit: 10,
+        ..Default::default()
+    };
+    hub.sync_now(account.id);
+    let db3 = db.clone();
+    let mut found = None;
+    for _ in 0..100 {
+        let page = db3.threads(&archived).await.unwrap();
+        let t = page.into_iter().find(|t| t.subject == "Recibo de noviembre");
+        let confirmed = match &t {
+            Some(t) => db3.thread(t.id).await.unwrap().unwrap().messages[0].uid > 0,
+            None => false,
+        };
+        if confirmed {
+            found = t;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let receipt = found.expect("el recibo, ya confirmado, en el archivo");
+    assert_eq!(receipt.labels, vec![label]);
+    assert_eq!(receipt.unread, 0);
+
+    // Y desde Buzón se devuelve a la entrada.
+    let ops = db
+        .move_messages(&[receipt.id], &[], None, &Place::Role("inbox".into()))
+        .await
+        .unwrap();
+    assert_eq!(ops.len(), 1);
+    hub.move_messages(&ops);
+    wait_for("de vuelta en la entrada del servidor", || {
+        st.lock().unwrap().folder("INBOX").msgs.len() == 4
+    })
+    .await;
 
     hub.stop(account.id);
     assert_eq!(hub.state(account.id), State::Off);

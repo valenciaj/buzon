@@ -862,6 +862,14 @@ async fn sends_replies_through_smtp() {
     assert_eq!(r.status, StatusCode::OK, "{}", r.body);
     assert!(r.body["message_id"].as_str().unwrap().ends_with("@pruebas.es"));
 
+    let book = t.call("GET", "/api/v1/contacts", Some(&cookie), None).await;
+    assert!(book
+        .body
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|c| c["email"] == "ana@ejemplo.es" && c["source"] == "sent"));
+
     let (rcpt, data) = received.await.unwrap();
     assert_eq!(rcpt.len(), 2, "{rcpt:?}");
     assert!(data.contains("In-Reply-To: <f1@ejemplo.es>"), "{data}");
@@ -909,5 +917,329 @@ async fn sends_replies_through_smtp() {
             .unwrap()
             .len(),
         1
+    );
+}
+
+#[tokio::test]
+async fn organizes_searches_and_labels_threads() {
+    let t = app().await;
+    let cookie = t.setup().await;
+    let (thread, _) = seed_mail(&t, &cookie).await;
+    let me = t.call("GET", "/api/v1/me", Some(&cookie), None).await;
+    let user: Id = me.body["id"].as_str().unwrap().parse().unwrap();
+    let account: Id = t.call("GET", "/api/v1/accounts", Some(&cookie), None).await.body[0]["id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let udb = UserDb::open(t.dir.path(), user).await.unwrap();
+    udb.upsert_mailbox(account, "Archivo", None, Some("archive"))
+        .await
+        .unwrap();
+    udb.upsert_mailbox(account, "Papelera", None, Some("trash"))
+        .await
+        .unwrap();
+    let list = |q: &str| format!("/api/v1/threads?{q}");
+
+    // Buscar.
+    let found = t.call("GET", &list("q=fotos"), Some(&cookie), None).await;
+    assert_eq!(found.status, StatusCode::OK, "{}", found.body);
+    assert_eq!(found.body["threads"][0]["id"], thread.to_base58());
+    for (q, n) in [
+        ("q=de%3Aana%20te%20paso", 1),
+        ("q=de%3Aluis", 0),
+        ("q=tiene%3Aadjunto%20es%3Anoleido", 1),
+    ] {
+        let r = t.call("GET", &list(q), Some(&cookie), None).await;
+        assert_eq!(r.body["threads"].as_array().unwrap().len(), n, "{q}");
+    }
+
+    // Etiquetas.
+    let bad = t
+        .call(
+            "POST",
+            "/api/v1/labels",
+            Some(&cookie),
+            Some(json!({"name": "Casa", "color": "verde"})),
+        )
+        .await;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+    let label = t
+        .call(
+            "POST",
+            "/api/v1/labels",
+            Some(&cookie),
+            Some(json!({"name": "Casa", "color": "#2F9A72"})),
+        )
+        .await;
+    assert_eq!(label.status, StatusCode::OK, "{}", label.body);
+    assert_eq!(label.body["color"], "#2f9a72");
+    let label_id = label.body["id"].as_str().unwrap().to_string();
+    let dup = t
+        .call(
+            "POST",
+            "/api/v1/labels",
+            Some(&cookie),
+            Some(json!({"name": "casa", "color": "#000000"})),
+        )
+        .await;
+    assert_eq!(dup.status, StatusCode::CONFLICT);
+    let r = t
+        .call(
+            "POST",
+            "/api/v1/threads/labels",
+            Some(&cookie),
+            Some(json!({"threads": [thread.to_base58()], "add": [label_id]})),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    let by_label = t
+        .call("GET", &list(&format!("label={label_id}")), Some(&cookie), None)
+        .await;
+    assert_eq!(by_label.body["threads"][0]["labels"][0], label_id.as_str());
+    let by_name = t.call("GET", &list("q=etiqueta%3Acasa"), Some(&cookie), None).await;
+    assert_eq!(by_name.body["threads"].as_array().unwrap().len(), 1);
+    let none = t.call("GET", &list("q=etiqueta%3Anada"), Some(&cookie), None).await;
+    assert_eq!(none.body["threads"].as_array().unwrap().len(), 0);
+    let detail = t
+        .call("GET", &format!("/api/v1/threads/{thread}"), Some(&cookie), None)
+        .await;
+    assert_eq!(detail.body["labels"][0], label_id.as_str());
+    assert_eq!(
+        t.call("GET", "/api/v1/labels", Some(&cookie), None).await.body[0]["threads"],
+        1
+    );
+
+    // Leído y destacado, varios a la vez.
+    let r = t
+        .call(
+            "POST",
+            "/api/v1/threads/flags",
+            Some(&cookie),
+            Some(json!({"threads": [thread.to_base58()], "seen": true, "flagged": true})),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    let page = t.call("GET", &list("role=inbox"), Some(&cookie), None).await;
+    assert_eq!(page.body["threads"][0]["unread"], 0);
+    assert_eq!(page.body["threads"][0]["flagged"], true);
+
+    // Archivar, sin carpeta de spam, a la papelera y borrar para siempre.
+    let mv = |to: &str| json!({"threads": [thread.to_base58()], "from_role": "inbox", "to_role": to});
+    let r = t
+        .call("POST", "/api/v1/threads/move", Some(&cookie), Some(mv("archive")))
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    assert_eq!(r.body["moved"], 1);
+    assert_eq!(
+        t.call("GET", &list("role=inbox"), Some(&cookie), None).await.body["threads"],
+        json!([])
+    );
+    assert_eq!(
+        t.call("GET", &list("role=archive"), Some(&cookie), None).await.body["threads"][0]["id"],
+        thread.to_base58()
+    );
+    let r = t
+        .call(
+            "POST",
+            "/api/v1/threads/move",
+            Some(&cookie),
+            Some(json!({"threads": [thread.to_base58()], "to_role": "junk"})),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CONFLICT);
+    assert_eq!(r.body["error"], "missing_folder");
+    let r = t
+        .call(
+            "POST",
+            "/api/v1/threads/move",
+            Some(&cookie),
+            Some(json!({"threads": [thread.to_base58()], "to_role": "sent"})),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "a Enviados no se mueve");
+
+    // Lo recién movido espera a que el servidor lo confirme antes de volver a moverse,
+    // así que para la prueba se da por confirmado.
+    sqlx_confirm(&udb).await;
+    let r = t
+        .call(
+            "POST",
+            "/api/v1/threads/move",
+            Some(&cookie),
+            Some(json!({"threads": [thread.to_base58()], "to_role": "trash"})),
+        )
+        .await;
+    assert_eq!(r.body["moved"], 1);
+    let r = t
+        .call(
+            "POST",
+            "/api/v1/threads/delete",
+            Some(&cookie),
+            Some(json!({"threads": [thread.to_base58()]})),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    assert_eq!(r.body["deleted"], 1);
+    assert_eq!(
+        t.call("GET", &format!("/api/v1/threads/{thread}"), Some(&cookie), None)
+            .await
+            .status,
+        StatusCode::NOT_FOUND
+    );
+
+    // Otra persona no puede tocar nada de esto.
+    let ana = t.invite_user(&cookie, "ana").await;
+    let r = t
+        .call(
+            "PUT",
+            &format!("/api/v1/labels/{label_id}"),
+            Some(&ana),
+            Some(json!({"name": "Mía", "color": "#000000"})),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+}
+
+/// Da por confirmados en el servidor los mensajes movidos (como haría la sincronización).
+async fn sqlx_confirm(udb: &UserDb) {
+    for mb in udb.mailboxes(None).await.unwrap() {
+        for t in udb
+            .threads(&buzon_store::mail::ThreadQuery {
+                mailbox: Some(mb.mailbox.id),
+                limit: 100,
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+        {
+            let th = udb.thread(t.id).await.unwrap().unwrap();
+            for m in th.messages.iter().filter(|m| m.uid == 0) {
+                udb.confirm_move_for_tests(m.id, 99).await.unwrap();
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn rules_and_address_book() {
+    let t = app().await;
+    let cookie = t.setup().await;
+    let label = t
+        .call(
+            "POST",
+            "/api/v1/labels",
+            Some(&cookie),
+            Some(json!({"name": "Facturas", "color": "#c4683a"})),
+        )
+        .await;
+    let label_id = label.body["id"].as_str().unwrap().to_string();
+
+    let empty = t
+        .call(
+            "POST",
+            "/api/v1/rules",
+            Some(&cookie),
+            Some(json!({"name": "Todo", "mark_read": true})),
+        )
+        .await;
+    assert_eq!(empty.status, StatusCode::BAD_REQUEST, "sin condiciones no");
+    let nothing = t
+        .call(
+            "POST",
+            "/api/v1/rules",
+            Some(&cookie),
+            Some(json!({"name": "Nada", "from_has": "x"})),
+        )
+        .await;
+    assert_eq!(nothing.status, StatusCode::BAD_REQUEST, "sin acciones no");
+    let rule = t
+        .call(
+            "POST",
+            "/api/v1/rules",
+            Some(&cookie),
+            Some(json!({"name": "Luz", "from_has": "@luz.es", "subject_has": "factura",
+                "label_id": label_id, "mark_read": true, "move_to": "archive"})),
+        )
+        .await;
+    assert_eq!(rule.status, StatusCode::OK, "{}", rule.body);
+    assert_eq!(rule.body["enabled"], true);
+    assert_eq!(rule.body["move_to"], "archive");
+    let id = rule.body["id"].as_str().unwrap().to_string();
+    let mut changed = rule.body.clone();
+    changed["enabled"] = json!(false);
+    let r = t
+        .call("PUT", &format!("/api/v1/rules/{id}"), Some(&cookie), Some(changed))
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    assert_eq!(r.body["enabled"], false);
+    assert_eq!(
+        t.call("GET", "/api/v1/rules", Some(&cookie), None)
+            .await
+            .body
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let del = t
+        .call("DELETE", &format!("/api/v1/rules/{id}"), Some(&cookie), None)
+        .await;
+    assert_eq!(del.status, StatusCode::NO_CONTENT);
+
+    // Libreta.
+    let c = t
+        .call(
+            "POST",
+            "/api/v1/contacts",
+            Some(&cookie),
+            Some(json!({"name": "Ana", "email": "ana@ejemplo.es"})),
+        )
+        .await;
+    assert_eq!(c.status, StatusCode::OK, "{}", c.body);
+    assert_eq!(c.body["source"], "manual");
+    let dup = t
+        .call(
+            "POST",
+            "/api/v1/contacts",
+            Some(&cookie),
+            Some(json!({"email": "ANA@ejemplo.es"})),
+        )
+        .await;
+    assert_eq!(dup.status, StatusCode::CONFLICT);
+    let bad = t
+        .call("POST", "/api/v1/contacts", Some(&cookie), Some(json!({"email": "ana"})))
+        .await;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+    let imp = t
+        .call(
+            "POST",
+            "/api/v1/contacts/import",
+            Some(&cookie),
+            Some(json!({"vcard": "BEGIN:VCARD\nFN:Luis\nEMAIL:luis@ejemplo.es\nEND:VCARD\nBEGIN:VCARD\nFN:Ana G\nEMAIL:ana@ejemplo.es\nEND:VCARD\n"})),
+        )
+        .await;
+    assert_eq!(imp.body, json!({"added": 1, "existing": 1}));
+    let list = t.call("GET", "/api/v1/contacts?q=ejemplo", Some(&cookie), None).await;
+    assert_eq!(list.body.as_array().unwrap().len(), 2);
+    let sug = t
+        .call("GET", "/api/v1/contacts/suggest?q=lu", Some(&cookie), None)
+        .await;
+    assert_eq!(sug.body[0]["email"], "luis@ejemplo.es");
+    let id = c.body["id"].as_str().unwrap();
+    let r = t
+        .call(
+            "PUT",
+            &format!("/api/v1/contacts/{id}"),
+            Some(&cookie),
+            Some(json!({"name": "Ana García", "email": "ana@ejemplo.es", "phone": "600"})),
+        )
+        .await;
+    assert_eq!(r.body["name"], "Ana García");
+    assert_eq!(
+        t.call("DELETE", &format!("/api/v1/contacts/{id}"), Some(&cookie), None)
+            .await
+            .status,
+        StatusCode::NO_CONTENT
     );
 }

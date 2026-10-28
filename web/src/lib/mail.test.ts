@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Mailbox } from './api'
-import { boxKey, customFolders, dayGroup, emailDocument, fileSize, initials, linkify, parseBox, shortDate, unreadByRole } from './mail'
+import { actionsFor, boxKey, customFolders, dayGroup, emailDocument, fileSize, initials, linkify, parseBox, shortDate, unreadByRole } from './mail'
 
 const mb = (p: Partial<Mailbox>): Mailbox => ({
   id: 'x', account_id: 'a', name: 'INBOX', delimiter: '/', role: null, total: 0, unread: 0, ...p,
@@ -13,6 +13,16 @@ describe('carpetas', () => {
     expect(parseBox('m:abc')).toEqual({ mailbox: 'abc' })
     expect(parseBox('nada')).toEqual({ role: 'inbox' })
     expect(boxKey({ mailbox: 'abc' })).toBe('m:abc')
+    expect(parseBox('l:xyz')).toEqual({ label: 'xyz' })
+    expect(boxKey({ label: 'xyz' })).toBe('l:xyz')
+  })
+  it('ofrece las acciones que tienen sentido en cada carpeta', () => {
+    expect(actionsFor('inbox')).toEqual(['archive', 'trash', 'junk'])
+    expect(actionsFor(null)).toEqual(['archive', 'trash', 'junk'])
+    expect(actionsFor('archive')).toEqual(['inbox', 'trash', 'junk'])
+    expect(actionsFor('trash')).toEqual(['inbox', 'delete'])
+    expect(actionsFor('junk')).toEqual(['inbox', 'delete'])
+    expect(actionsFor('sent')).toEqual(['trash'])
   })
   it('suma no leídos por tipo y lista las carpetas propias', () => {
     const list = [

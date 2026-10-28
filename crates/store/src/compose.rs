@@ -304,7 +304,8 @@ impl UserDb {
             Ok(MessageRef {
                 account_id: id_of(&r, "account_id")?,
                 mailbox: r.try_get("name")?,
-                uid: r.try_get::<i64, _>("uid")? as u32,
+                // 0 si se acaba de mover y el servidor aún no le ha dado UID.
+                uid: r.try_get::<i64, _>("uid")?.max(0) as u32,
                 message_id: r.try_get("message_id")?,
                 refs: r
                     .try_get::<String, _>("refs")?
@@ -335,13 +336,18 @@ impl UserDb {
         )
     }
 
-    /// Direcciones que ya te han escrito, las más frecuentes primero.
+    /// Direcciones para autocompletar: primero la libreta, luego quien te ha escrito
+    /// (los más frecuentes antes).
     pub async fn contacts(&self, q: &str, limit: u32) -> Result<Vec<Contact>> {
         let like = format!("%{}%", q.replace(['%', '_'], ""));
         let rows = sqlx::query(
-            "SELECT MAX(from_name) AS name, lower(from_addr) AS email, COUNT(*) AS n FROM messages \
-             WHERE from_addr IS NOT NULL AND (from_addr LIKE ?1 OR from_name LIKE ?1) \
-             GROUP BY lower(from_addr) ORDER BY n DESC, email LIMIT ?2",
+            "SELECT name, email FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY email ORDER BY book) AS rn FROM (\
+               SELECT NULLIF(name, '') AS name, lower(email) AS email, 0 AS book, 0 AS n FROM contacts \
+               WHERE email LIKE ?1 OR name LIKE ?1 \
+               UNION ALL \
+               SELECT MAX(from_name), lower(from_addr), 1, COUNT(*) FROM messages \
+               WHERE from_addr IS NOT NULL AND (from_addr LIKE ?1 OR from_name LIKE ?1) GROUP BY lower(from_addr))) \
+             WHERE rn = 1 ORDER BY book, n DESC, email LIMIT ?2",
         )
         .bind(like)
         .bind(limit as i64)

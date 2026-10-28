@@ -8,6 +8,7 @@ use std::time::Duration;
 use async_imap::extensions::idle::IdleResponse;
 use async_imap::types::{Fetch, Flag, NameAttribute};
 use buzon_store::mail::{decode_mailbox_name, Flags, Mailbox};
+use buzon_store::organize::{self, Place, Rule, RuleActions, RuleInput};
 use buzon_store::{now, Id, UserDb};
 use futures::TryStreamExt;
 use tokio::sync::mpsc;
@@ -99,13 +100,21 @@ async fn session(
     retry: &mut Duration,
 ) -> Result<()> {
     let mut s = conn::connect(&ctx.cfg).await?;
-    let idle = s.capabilities().await?.has_str("IDLE");
+    let caps = {
+        let c = s.capabilities().await?;
+        Caps {
+            idle: c.has_str("IDLE"),
+            mv: c.has_str("MOVE"),
+            uidplus: c.has_str("UIDPLUS"),
+        }
+    };
+    let idle = caps.idle;
     loop {
         ctx.state(State::Syncing);
         for c in pending.drain(..) {
-            apply(&mut s, c).await?;
+            apply(&mut s, c, caps).await?;
         }
-        let (inbox, more) = full_sync(&mut s, ctx).await?;
+        let (inbox, more) = full_sync(&mut s, ctx, caps).await?;
         ctx.db.set_sync_result(ctx.account, None).await?;
         ctx.state(State::Idle);
         *retry = MIN_RETRY;
@@ -128,11 +137,11 @@ async fn session(
                     return Ok(());
                 }
                 Wake::SyncNow => break,
-                Wake::Cmd(c) => apply(&mut s, c).await?,
+                Wake::Cmd(c) => apply(&mut s, c, caps).await?,
                 Wake::NewData | Wake::Timeout => {
                     if let Some(mb) = &inbox {
                         let fresh = ctx.db.mailbox(mb.id).await?.unwrap_or_else(|| mb.clone());
-                        if sync_mailbox(&mut s, ctx, &fresh).await?.changed {
+                        if sync_mailbox(&mut s, ctx, &fresh, caps).await?.changed {
                             ctx.changed();
                         }
                     }
@@ -185,7 +194,43 @@ async fn wait_poll(s: Session, rx: &mut mpsc::UnboundedReceiver<Cmd>, dur: Durat
     (s, wake)
 }
 
-async fn apply(s: &mut Session, cmd: Cmd) -> Result<()> {
+/// Lo que sabe hacer el servidor, aparte de lo básico.
+#[derive(Clone, Copy)]
+struct Caps {
+    idle: bool,
+    mv: bool,
+    uidplus: bool,
+}
+
+async fn imap_move(s: &mut Session, from: &str, to: &str, uids: &[u32], caps: Caps) -> Result<()> {
+    s.select(from).await?;
+    let set = uid_set(uids);
+    if caps.mv {
+        s.uid_mv(&set, to).await?;
+    } else {
+        s.uid_copy(&set, to).await?;
+        expunge(s, &set, caps).await?;
+    }
+    Ok(())
+}
+
+/// Marca como borrados y los elimina. Sin UIDPLUS, EXPUNGE borra también lo que otro
+/// programa hubiera marcado como borrado en esa carpeta (es lo que haría él).
+async fn expunge(s: &mut Session, set: &str, caps: Caps) -> Result<()> {
+    let _: Vec<Fetch> = s
+        .uid_store(set, "+FLAGS.SILENT (\\Deleted)")
+        .await?
+        .try_collect()
+        .await?;
+    if caps.uidplus {
+        let _: Vec<_> = s.uid_expunge(set).await?.try_collect().await?;
+    } else {
+        let _: Vec<_> = s.expunge().await?.try_collect().await?;
+    }
+    Ok(())
+}
+
+async fn apply(s: &mut Session, cmd: Cmd, caps: Caps) -> Result<()> {
     match cmd {
         Cmd::Store {
             mailbox,
@@ -199,6 +244,11 @@ async fn apply(s: &mut Session, cmd: Cmd) -> Result<()> {
             let _: Vec<Fetch> = s.uid_store(&set, &query).await?.try_collect().await?;
         }
         Cmd::Append { mailbox, raw } => s.append(&mailbox, Some("(\\Seen)"), None, &raw).await?,
+        Cmd::Move { from, to, uids } => imap_move(s, &from, &to, &uids, caps).await?,
+        Cmd::Expunge { mailbox, uids } => {
+            s.select(&mailbox).await?;
+            expunge(s, &uid_set(&uids), caps).await?;
+        }
         Cmd::SyncNow | Cmd::Stop => {}
     }
     Ok(())
@@ -241,7 +291,7 @@ pub(crate) fn role_of(name: &str, delimiter: Option<&str>, attrs: &[NameAttribut
 }
 
 /// Repasa todas las carpetas. Devuelve la bandeja de entrada y si falta historial.
-async fn full_sync(s: &mut Session, ctx: &Ctx) -> Result<(Option<Mailbox>, bool)> {
+async fn full_sync(s: &mut Session, ctx: &Ctx, caps: Caps) -> Result<(Option<Mailbox>, bool)> {
     let names: Vec<_> = s.list(Some(""), Some("*")).await?.try_collect().await?;
     let mut keep = Vec::new();
     let mut boxes = Vec::new();
@@ -270,7 +320,7 @@ async fn full_sync(s: &mut Session, ctx: &Ctx) -> Result<(Option<Mailbox>, bool)
     boxes.sort_by_key(|m| m.role.as_deref() != Some("inbox"));
     let mut more = false;
     for mb in &boxes {
-        let r = sync_mailbox(s, ctx, mb).await?;
+        let r = sync_mailbox(s, ctx, mb, caps).await?;
         more |= r.more;
         if r.changed {
             ctx.changed();
@@ -304,7 +354,7 @@ async fn search(s: &mut Session, query: &str) -> Result<Vec<u32>> {
     Ok(v)
 }
 
-async fn sync_mailbox(s: &mut Session, ctx: &Ctx, mb: &Mailbox) -> Result<MailboxSync> {
+async fn sync_mailbox(s: &mut Session, ctx: &Ctx, mb: &Mailbox, caps: Caps) -> Result<MailboxSync> {
     let info = s.select(&mb.name).await?;
     let validity = info.uid_validity.unwrap_or(0);
     let (mut last_uid, mut oldest) = (mb.last_uid, mb.oldest_uid);
@@ -365,10 +415,19 @@ async fn sync_mailbox(s: &mut Session, ctx: &Ctx, mb: &Mailbox) -> Result<Mailbo
         v
     };
     if !new.is_empty() {
-        download(s, ctx, mb, &new).await?;
+        // Los filtros automáticos solo se aplican al correo que llega a la entrada,
+        // no al que se baja la primera vez.
+        let rules = if mb.last_uid > 0 && mb.role.as_deref() == Some("inbox") {
+            Some(ctx.db.rules().await?)
+        } else {
+            None
+        };
+        let mut hits = Vec::new();
+        download(s, ctx, mb, &new, rules.as_deref(), &mut hits).await?;
         last_uid = last_uid.max(*new.last().expect("no vacío"));
         changed = true;
         ctx.db.set_mailbox_state(mb.id, validity, last_uid, oldest).await?;
+        apply_rules(s, ctx, mb, hits, caps).await?;
     }
 
     // Historial antiguo, por tandas.
@@ -378,12 +437,19 @@ async fn sync_mailbox(s: &mut Session, ctx: &Ctx, mb: &Mailbox) -> Result<Mailbo
         let start = older.len().saturating_sub(BACKFILL);
         let batch = older.split_off(start);
         if !batch.is_empty() {
-            download(s, ctx, mb, &batch).await?;
+            download(s, ctx, mb, &batch, None, &mut Vec::new()).await?;
             changed = true;
         }
         oldest = Some(if start == 0 { 0 } else { batch[0] });
     }
     ctx.db.set_mailbox_state(mb.id, validity, last_uid, oldest).await?;
+
+    // Lo movido desde Buzón ya tiene su copia real aquí.
+    let confirmed = ctx.db.drop_confirmed_moves(mb.id).await?;
+    if !confirmed.is_empty() {
+        ctx.remove_raw(&confirmed);
+        changed = true;
+    }
     Ok(MailboxSync {
         changed,
         more: oldest.is_some_and(|o| o > 1),
@@ -391,7 +457,68 @@ async fn sync_mailbox(s: &mut Session, ctx: &Ctx, mb: &Mailbox) -> Result<Mailbo
 }
 
 /// Descarga y guarda mensajes, en tandas limitadas por número y tamaño.
-async fn download(s: &mut Session, ctx: &Ctx, mb: &Mailbox, uids: &[u32]) -> Result<()> {
+/// Un mensaje recién llegado que cumple algún filtro automático.
+struct Hit {
+    uid: u32,
+    message: Id,
+    thread: Id,
+    flags: Flags,
+    actions: RuleActions,
+}
+
+async fn apply_rules(s: &mut Session, ctx: &Ctx, mb: &Mailbox, hits: Vec<Hit>, caps: Caps) -> Result<()> {
+    for h in hits {
+        let a = &h.actions;
+        if !a.labels.is_empty() {
+            ctx.db.label_threads(&[h.thread], &a.labels, &[]).await?;
+        }
+        let flags = Flags {
+            seen: h.flags.seen || a.mark_read,
+            flagged: h.flags.flagged || a.star,
+            answered: h.flags.answered,
+        };
+        if flags != h.flags {
+            ctx.db.set_flags(h.message, flags).await?;
+            let mut names = Vec::new();
+            if a.mark_read {
+                names.push("\\Seen");
+            }
+            if a.star {
+                names.push("\\Flagged");
+            }
+            s.select(&mb.name).await?;
+            let query = format!("+FLAGS.SILENT ({})", names.join(" "));
+            let _: Vec<Fetch> = s.uid_store(h.uid.to_string(), &query).await?.try_collect().await?;
+        }
+        if let Some(role) = &a.move_to {
+            match ctx
+                .db
+                .move_messages(&[], &[h.message], None, &Place::Role(role.clone()))
+                .await
+            {
+                Ok(ops) => {
+                    for op in ops {
+                        imap_move(s, &op.from, &op.to, &op.uids, caps).await?;
+                    }
+                }
+                Err(buzon_store::Error::MissingFolder(f)) => {
+                    tracing::warn!("cuenta {}: un filtro mueve a «{f}», pero no existe", ctx.account)
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn download(
+    s: &mut Session,
+    ctx: &Ctx,
+    mb: &Mailbox,
+    uids: &[u32],
+    rules: Option<&[Rule]>,
+    hits: &mut Vec<Hit>,
+) -> Result<()> {
     for chunk in uids.chunks(200) {
         let sizes: Vec<Fetch> = s
             .uid_fetch(uid_set(chunk), "(UID RFC822.SIZE)")
@@ -407,7 +534,7 @@ async fn download(s: &mut Session, ctx: &Ctx, mb: &Mailbox, uids: &[u32]) -> Res
         let mut bytes = 0;
         for (uid, size) in sizes {
             if !batch.is_empty() && (batch.len() >= BATCH_COUNT || bytes + size > BATCH_BYTES) {
-                fetch_batch(s, ctx, mb, &batch).await?;
+                fetch_batch(s, ctx, mb, &batch, rules, hits).await?;
                 batch.clear();
                 bytes = 0;
             }
@@ -415,13 +542,20 @@ async fn download(s: &mut Session, ctx: &Ctx, mb: &Mailbox, uids: &[u32]) -> Res
             bytes += size;
         }
         if !batch.is_empty() {
-            fetch_batch(s, ctx, mb, &batch).await?;
+            fetch_batch(s, ctx, mb, &batch, rules, hits).await?;
         }
     }
     Ok(())
 }
 
-async fn fetch_batch(s: &mut Session, ctx: &Ctx, mb: &Mailbox, uids: &[u32]) -> Result<()> {
+async fn fetch_batch(
+    s: &mut Session,
+    ctx: &Ctx,
+    mb: &Mailbox,
+    uids: &[u32],
+    rules: Option<&[Rule]>,
+    hits: &mut Vec<Hit>,
+) -> Result<()> {
     let fetches: Vec<Fetch> = s
         .uid_fetch(uid_set(uids), "(UID FLAGS RFC822.SIZE BODY.PEEK[])")
         .await?
@@ -446,7 +580,29 @@ async fn fetch_batch(s: &mut Session, ctx: &Ctx, mb: &Mailbox, uids: &[u32]) -> 
             .await
             .map_err(|_| crate::Error::Config("análisis interrumpido"))?;
         tokio::fs::write(ctx.raw_dir.join(format!("{id}.eml")), &raw).await?;
-        ctx.db.insert_message(&msg).await?;
+        let thread = ctx.db.insert_message(&msg).await?;
+        if let Some(rules) = rules {
+            let actions = organize::apply_rules(
+                rules,
+                &RuleInput {
+                    account_id: ctx.account,
+                    from: msg.from.as_ref(),
+                    to: &msg.to,
+                    cc: &msg.cc,
+                    subject: &msg.subject,
+                    text: msg.text.as_deref().unwrap_or(""),
+                },
+            );
+            if !actions.is_empty() {
+                hits.push(Hit {
+                    uid,
+                    message: msg.id,
+                    thread,
+                    flags: msg.flags,
+                    actions,
+                });
+            }
+        }
     }
     Ok(())
 }

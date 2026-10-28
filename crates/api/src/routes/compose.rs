@@ -405,6 +405,7 @@ pub async fn send_mail(
     let html = Some(m.html.trim())
         .filter(|h| !h.is_empty())
         .map(|h| buzon_sync::parse::sanitize_html(h, &HashMap::new()).html);
+    let recipients: Vec<Addr> = to.iter().chain(&cc).chain(&bcc).cloned().collect();
     let outgoing = Outgoing {
         from: Addr {
             name: Some(identity.name.clone()).filter(|n| !n.is_empty()),
@@ -458,6 +459,8 @@ pub async fn send_mail(
     if let Some(d) = req.draft_id {
         let _ = udb.delete_draft(d).await;
     }
+    // A quien escribes pasa a tu libreta.
+    let _ = udb.remember_recipients(&recipients).await;
     let _ = remove_uploads(&st, user, &udb, &m.attachments).await;
     st.sync.emit(user, account.id);
     let _ = st.db.audit(Some(user), "mail.sent", None).await;
@@ -473,7 +476,7 @@ pub struct ContactParams {
 }
 
 /// Direcciones conocidas para autocompletar destinatarios.
-#[utoipa::path(get, path = "/api/v1/contacts", tag = "compose", params(ContactParams),
+#[utoipa::path(get, path = "/api/v1/contacts/suggest", tag = "compose", params(ContactParams),
     responses((status = 200, body = [ContactOut])))]
 pub async fn contacts(
     State(st): State<Arc<AppState>>,

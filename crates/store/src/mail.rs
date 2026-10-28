@@ -88,6 +88,10 @@ pub struct ThreadQuery {
     /// Cursor: hilos anteriores a esta fecha e id.
     pub before: Option<(i64, Id)>,
     pub limit: u32,
+    /// Solo hilos con esta etiqueta.
+    pub label: Option<Id>,
+    /// Búsqueda: algún mensaje del hilo debe cumplirla entera.
+    pub search: Option<crate::organize::Search>,
 }
 
 #[derive(Debug, Clone)]
@@ -102,6 +106,7 @@ pub struct ThreadSummary {
     pub unread: i64,
     pub flagged: bool,
     pub has_attachments: bool,
+    pub labels: Vec<Id>,
 }
 
 #[derive(Debug, Clone)]
@@ -230,7 +235,7 @@ fn decode_b64(s: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-async fn delete_messages_tx(tx: &mut SqliteConnection, ids: &[Id]) -> Result<()> {
+pub(crate) async fn delete_messages_tx(tx: &mut SqliteConnection, ids: &[Id]) -> Result<()> {
     if ids.is_empty() {
         return Ok(());
     }
@@ -376,11 +381,12 @@ impl UserDb {
 
     /// UIDs ya guardados de una carpeta, con sus flags.
     pub async fn known_uids(&self, mailbox: Id) -> Result<Vec<(u32, Id, Flags)>> {
-        let rows =
-            sqlx::query("SELECT uid, id, seen, flagged, answered FROM messages WHERE mailbox_id = ? ORDER BY uid")
-                .bind(b(mailbox))
-                .fetch_all(&self.pool)
-                .await?;
+        let rows = sqlx::query(
+            "SELECT uid, id, seen, flagged, answered FROM messages WHERE mailbox_id = ? AND uid > 0 ORDER BY uid",
+        )
+        .bind(b(mailbox))
+        .fetch_all(&self.pool)
+        .await?;
         rows.iter()
             .map(|r| {
                 Ok((
@@ -434,6 +440,12 @@ impl UserDb {
         let thread = match threads.split_first() {
             Some((keep, others)) => {
                 for o in others {
+                    // Las etiquetas del hilo que desaparece pasan al que queda.
+                    sqlx::query("UPDATE OR IGNORE thread_labels SET thread_id = ? WHERE thread_id = ?")
+                        .bind(keep)
+                        .bind(o)
+                        .execute(&mut *tx)
+                        .await?;
                     sqlx::query("UPDATE messages SET thread_id = ? WHERE thread_id = ?")
                         .bind(keep)
                         .bind(o)
@@ -539,7 +551,8 @@ impl UserDb {
              (SELECT MAX(has_attachments) FROM messages WHERE thread_id = t.id) AS att, \
              (SELECT snippet FROM messages WHERE thread_id = t.id ORDER BY date DESC LIMIT 1) AS snippet, \
              (SELECT group_concat(who, char(31)) FROM (SELECT COALESCE(from_name, from_addr, '') AS who, MAX(date) AS d \
-                FROM messages WHERE thread_id = t.id GROUP BY who ORDER BY d)) AS people \
+                FROM messages WHERE thread_id = t.id GROUP BY who ORDER BY d)) AS people, \
+             (SELECT group_concat(hex(label_id)) FROM thread_labels WHERE thread_id = t.id) AS labels \
              FROM threads t WHERE EXISTS (SELECT 1 FROM messages m JOIN mailboxes mb ON mb.id = m.mailbox_id \
              WHERE m.thread_id = t.id",
         );
@@ -549,7 +562,15 @@ impl UserDb {
         if let Some(role) = &q.role {
             s.push(" AND mb.role = ").push_bind(role.clone());
         }
+        if let Some(search) = &q.search {
+            search.push_conditions(&mut s);
+        }
         s.push(")");
+        if let Some(l) = q.label {
+            s.push(" AND EXISTS (SELECT 1 FROM thread_labels tl WHERE tl.thread_id = t.id AND tl.label_id = ")
+                .push_bind(b(l))
+                .push(")");
+        }
         if let Some(a) = q.account {
             s.push(" AND t.account_id = ").push_bind(b(a));
         }
@@ -582,6 +603,12 @@ impl UserDb {
                     unread: r.try_get("unread")?,
                     flagged: r.try_get::<Option<bool>, _>("flagged")?.unwrap_or(false),
                     has_attachments: r.try_get::<Option<bool>, _>("att")?.unwrap_or(false),
+                    labels: r
+                        .try_get::<Option<String>, _>("labels")?
+                        .unwrap_or_default()
+                        .split(',')
+                        .filter_map(crate::organize::id_from_hex)
+                        .collect(),
                 })
             })
             .collect()
@@ -617,7 +644,7 @@ impl UserDb {
             messages.push(StoredMessage {
                 id: id_of(r, "id")?,
                 mailbox_id: id_of(r, "mailbox_id")?,
-                uid: r.try_get::<i64, _>("uid")? as u32,
+                uid: r.try_get::<i64, _>("uid")?.max(0) as u32,
                 message_id,
                 subject: r.try_get("subject")?,
                 from: from_addr.map(|email| Addr {
@@ -712,6 +739,10 @@ async fn targets(tx: &mut SqliteConnection, sql: &str, v: bool, thread: Id) -> R
         .await?;
     let mut out = Vec::new();
     for r in &rows {
+        // Los mensajes recién movidos aún no tienen UID en el servidor.
+        if r.try_get::<i64, _>("uid")? <= 0 {
+            continue;
+        }
         let mailbox: String = sqlx::query_scalar("SELECT name FROM mailboxes WHERE id = ?")
             .bind(r.try_get::<&[u8], _>("mailbox_id")?)
             .fetch_one(&mut *tx)
