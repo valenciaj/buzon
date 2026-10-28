@@ -126,6 +126,14 @@ impl AppDb {
             .await?)
     }
 
+    /// Identificadores de todos los usuarios (para arrancar su sincronización).
+    pub async fn user_ids(&self) -> Result<Vec<Id>> {
+        let rows: Vec<Vec<u8>> = sqlx::query_scalar("SELECT id FROM users ORDER BY id")
+            .fetch_all(&self.pool)
+            .await?;
+        rows.iter().map(|b| Id::from_slice(b)).collect()
+    }
+
     pub async fn create_user(&self, u: NewUser<'_>) -> Result<User> {
         let id = Id::new();
         sqlx::query(

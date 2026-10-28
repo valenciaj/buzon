@@ -12,7 +12,9 @@ use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use buzon_store::app::User;
 use buzon_store::crypto::{self, MasterKey, SecretBox};
+use buzon_store::user::Account;
 use buzon_store::{AppDb, Id, UserDb};
+use buzon_sync::SyncHub;
 use tower_http::services::{ServeDir, ServeFile};
 use utoipa::OpenApi;
 use utoipa_scalar::{Scalar, Servable};
@@ -25,7 +27,7 @@ pub mod session;
 mod validate;
 
 use error::{ApiError, ApiResult};
-use routes::{accounts, auth, invitations, me, setup};
+use routes::{accounts, auth, invitations, mail, me, setup};
 
 pub struct AppState {
     pub db: AppDb,
@@ -35,6 +37,10 @@ pub struct AppState {
     pub cookie_secure: bool,
     /// URL pública de la configuración; si falta, se usa la guardada por el asistente.
     pub public_url: Option<String>,
+    /// Sincronización IMAP. `AppState::new` la deja apagada; actívala con `with_sync`.
+    pub sync: SyncHub,
+    /// Permite cuentas de correo sin cifrar (solo para pruebas locales).
+    pub allow_insecure_mail: bool,
     user_dbs: Mutex<HashMap<Id, UserDb>>,
 }
 
@@ -47,13 +53,44 @@ impl AppState {
         public_url: Option<String>,
     ) -> Self {
         AppState {
+            sync: SyncHub::new(data_dir.clone(), false),
             db,
             data_dir,
             master,
             cookie_secure,
             public_url,
+            allow_insecure_mail: false,
             user_dbs: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Activa la sincronización IMAP de verdad.
+    pub fn with_sync(mut self) -> Self {
+        self.sync = SyncHub::new(self.data_dir.clone(), true);
+        self
+    }
+
+    /// Empieza a sincronizar una cuenta.
+    pub async fn start_account(&self, user: Id, account: &Account) -> ApiResult<()> {
+        let udb = self.user_db(user).await?;
+        let password = udb
+            .account_password(account.id, &self.secrets_for(user))
+            .await?
+            .unwrap_or_default();
+        self.sync.start(user, udb, account, password);
+        Ok(())
+    }
+
+    /// Al arrancar el servidor: sincroniza las cuentas de todos los usuarios.
+    pub async fn start_all_accounts(&self) -> ApiResult<usize> {
+        let mut n = 0;
+        for user in self.db.user_ids().await? {
+            for acc in self.user_db(user).await?.accounts().await? {
+                self.start_account(user, &acc).await?;
+                n += 1;
+            }
+        }
+        Ok(n)
     }
 
     /// Base de datos del usuario (la crea la primera vez).
@@ -109,7 +146,8 @@ impl AppState {
         setup::status, setup::run,
         auth::login, auth::logout,
         me::get, me::update_preferences, me::totp_setup, me::totp_enable, me::totp_disable,
-        accounts::list, accounts::create,
+        accounts::list, accounts::create, accounts::remove, accounts::sync,
+        mail::mailboxes, mail::threads, mail::thread, mail::update_thread, mail::attachment, mail::events,
         invitations::create, invitations::list, invitations::revoke, invitations::check, invitations::accept,
     ),
     tags(
@@ -117,6 +155,7 @@ impl AppState {
         (name = "auth", description = "Inicio y cierre de sesión"),
         (name = "me", description = "Usuario actual, preferencias y 2FA"),
         (name = "accounts", description = "Cuentas de correo del usuario"),
+        (name = "mail", description = "Carpetas, hilos, mensajes y avisos en vivo"),
         (name = "invitations", description = "Registro por invitación (caduca a las 72 h)"),
     )
 )]
@@ -170,6 +209,13 @@ pub fn api_router(state: Arc<AppState>) -> Router {
         .route("/me/totp/enable", post(me::totp_enable))
         .route("/me/totp/disable", post(me::totp_disable))
         .route("/accounts", get(accounts::list).post(accounts::create))
+        .route("/accounts/{id}", delete(accounts::remove))
+        .route("/accounts/{id}/sync", post(accounts::sync))
+        .route("/mailboxes", get(mail::mailboxes))
+        .route("/threads", get(mail::threads))
+        .route("/threads/{id}", get(mail::thread).patch(mail::update_thread))
+        .route("/messages/{id}/attachments/{index}", get(mail::attachment))
+        .route("/events", get(mail::events))
         .route("/invitations", get(invitations::list).post(invitations::create))
         .route("/invitations/{id}", delete(invitations::revoke))
         .route("/invite/{token}", get(invitations::check).post(invitations::accept))

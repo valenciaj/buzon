@@ -71,6 +71,7 @@ pub async fn run(
     validate::language(&req.server.language)?;
     if let Some(a) = &req.account {
         validate_account(a)?;
+        crate::routes::accounts::check_security(&st, a)?;
     }
     if let Some(p) = req.preferences.as_ref().and_then(|p| p.font_size) {
         if !prefs::valid_font_size(p) {
@@ -111,7 +112,8 @@ pub async fn run(
         prefs::save(&udb, p).await?;
     }
     if let Some(a) = &req.account {
-        udb.add_account(new_account(a), &st.secrets_for(user.id)).await?;
+        let acc = udb.add_account(new_account(a), &st.secrets_for(user.id)).await?;
+        st.start_account(user.id, &acc).await?;
     }
     st.db.audit(Some(user.id), "setup.completed", None).await?;
 
@@ -130,5 +132,7 @@ pub fn new_account(a: &AccountInput) -> NewAccount<'_> {
         smtp_port: a.smtp_port,
         login: a.login.trim(),
         password: &a.password,
+        imap_security: &a.imap_security,
+        smtp_security: &a.smtp_security,
     }
 }

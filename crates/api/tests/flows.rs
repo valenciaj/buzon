@@ -5,13 +5,16 @@ use axum::http::{header, Request, StatusCode};
 use axum::Router;
 use buzon_api::AppState;
 use buzon_store::crypto::MasterKey;
-use buzon_store::AppDb;
+use buzon_store::mail::Flags;
+use buzon_store::user::user_raw_dir;
+use buzon_store::{AppDb, Id, UserDb};
+use buzon_sync::parse::Envelope;
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
 struct T {
-    _dir: tempfile::TempDir,
+    dir: tempfile::TempDir,
     app: Router,
 }
 
@@ -27,7 +30,7 @@ async fn app() -> T {
     );
     T {
         app: buzon_api::app(Arc::new(state), None),
-        _dir: dir,
+        dir,
     }
 }
 
@@ -35,6 +38,8 @@ struct Res {
     status: StatusCode,
     cookie: Option<String>,
     body: Value,
+    headers: axum::http::HeaderMap,
+    bytes: Vec<u8>,
 }
 
 impl T {
@@ -59,9 +64,16 @@ impl T {
             .headers()
             .get(header::SET_COOKIE)
             .map(|v| v.to_str().unwrap().split(';').next().unwrap().to_string());
-        let bytes = res.into_body().collect().await.unwrap().to_bytes();
+        let headers = res.headers().clone();
+        let bytes = res.into_body().collect().await.unwrap().to_bytes().to_vec();
         let body = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
-        Res { status, cookie, body }
+        Res {
+            status,
+            cookie,
+            body,
+            headers,
+            bytes,
+        }
     }
 
     async fn setup(&self) -> String {
@@ -415,4 +427,171 @@ async fn openapi_and_viewer_are_public() {
     let req = Request::builder().uri("/api/docs").body(Body::empty()).unwrap();
     let res = t.app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
+}
+
+const RAW: &str = "From: Ana <ana@ejemplo.es>\r\nTo: yo@ejemplo.es\r\nSubject: Fotos\r\nMessage-ID: <f1@ejemplo.es>\r\n\
+Date: Tue, 27 Oct 2026 10:00:00 +0000\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"B\"\r\n\r\n\
+--B\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nTe paso las fotos.\r\n\
+--B\r\nContent-Type: text/html; name=\"pagina.html\"\r\nContent-Disposition: attachment; filename=\"página.html\"\r\n\r\n\
+<script>alert(1)</script>\r\n--B--\r\n";
+
+/// Mete correo en la base de datos del usuario como lo haría la sincronización.
+async fn seed_mail(t: &T, cookie: &str) -> (Id, Id) {
+    let me = t.call("GET", "/api/v1/me", Some(cookie), None).await;
+    let user: Id = me.body["id"].as_str().unwrap().parse().unwrap();
+    let accounts = t.call("GET", "/api/v1/accounts", Some(cookie), None).await;
+    let account: Id = accounts.body[0]["id"].as_str().unwrap().parse().unwrap();
+    assert_eq!(accounts.body[0]["state"], "off");
+    assert_eq!(accounts.body[0]["imap_security"], "tls");
+
+    let udb = UserDb::open(t.dir.path(), user).await.unwrap();
+    let inbox = udb
+        .upsert_mailbox(account, "INBOX", Some("/"), Some("inbox"))
+        .await
+        .unwrap();
+    let msg_id = Id::new();
+    let raw_dir = user_raw_dir(t.dir.path(), user);
+    std::fs::create_dir_all(&raw_dir).unwrap();
+    std::fs::write(raw_dir.join(format!("{msg_id}.eml")), RAW).unwrap();
+    let m = buzon_sync::parse::parse(
+        RAW.as_bytes(),
+        Envelope {
+            id: msg_id,
+            account_id: account,
+            mailbox_id: inbox.id,
+            uid: 1,
+            size: RAW.len() as u32,
+            flags: Flags::default(),
+            fallback_date: 0,
+        },
+    );
+    let thread = udb.insert_message(&m).await.unwrap();
+    (thread, msg_id)
+}
+
+#[tokio::test]
+async fn reads_threads_messages_and_attachments() {
+    let t = app().await;
+    let cookie = t.setup().await;
+    let (thread, msg) = seed_mail(&t, &cookie).await;
+
+    let mbs = t.call("GET", "/api/v1/mailboxes", Some(&cookie), None).await;
+    assert_eq!(mbs.body[0]["role"], "inbox");
+    assert_eq!(mbs.body[0]["unread"], 1);
+
+    let page = t.call("GET", "/api/v1/threads?role=inbox", Some(&cookie), None).await;
+    assert_eq!(page.status, StatusCode::OK, "{}", page.body);
+    assert_eq!(page.body["threads"][0]["id"], thread.to_base58());
+    assert_eq!(page.body["threads"][0]["subject"], "Fotos");
+    assert_eq!(page.body["threads"][0]["has_attachments"], true);
+    assert_eq!(page.body["next_cursor"], Value::Null);
+    let bad = t.call("GET", "/api/v1/threads?role=nada", Some(&cookie), None).await;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+
+    let detail = t
+        .call("GET", &format!("/api/v1/threads/{thread}"), Some(&cookie), None)
+        .await;
+    let m = &detail.body["messages"][0];
+    assert_eq!(m["from"]["name"], "Ana");
+    assert_eq!(m["seen"], false);
+    let url = m["attachments"][0]["url"].as_str().unwrap().to_string();
+    assert_eq!(url, format!("/api/v1/messages/{msg}/attachments/0"));
+
+    // Un adjunto HTML se descarga como binario, nunca se muestra.
+    let file = t.call("GET", &url, Some(&cookie), None).await;
+    assert_eq!(file.status, StatusCode::OK);
+    assert_eq!(file.headers["content-type"], "application/octet-stream");
+    assert_eq!(file.headers["x-content-type-options"], "nosniff");
+    assert!(file.headers["content-disposition"]
+        .to_str()
+        .unwrap()
+        .contains("p%C3%A1gina.html"));
+    assert!(String::from_utf8_lossy(&file.bytes).contains("<script>"));
+    let none = t
+        .call(
+            "GET",
+            &format!("/api/v1/messages/{msg}/attachments/9"),
+            Some(&cookie),
+            None,
+        )
+        .await;
+    assert_eq!(none.status, StatusCode::NOT_FOUND);
+
+    let r = t
+        .call(
+            "PATCH",
+            &format!("/api/v1/threads/{thread}"),
+            Some(&cookie),
+            Some(json!({"seen": true, "flagged": true})),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    let detail = t
+        .call("GET", &format!("/api/v1/threads/{thread}"), Some(&cookie), None)
+        .await;
+    assert_eq!(detail.body["messages"][0]["seen"], true);
+    assert_eq!(detail.body["messages"][0]["flagged"], true);
+
+    // Otra persona no ve nada de esto.
+    let ana = t.invite_user(&cookie, "ana").await;
+    let other = t
+        .call("GET", &format!("/api/v1/threads/{thread}"), Some(&ana), None)
+        .await;
+    assert_eq!(other.status, StatusCode::NOT_FOUND);
+    assert_eq!(
+        t.call("GET", &url, Some(&ana), None).await.status,
+        StatusCode::NOT_FOUND
+    );
+    let anon = t.call("GET", "/api/v1/threads", None, None).await;
+    assert_eq!(anon.status, StatusCode::UNAUTHORIZED);
+
+    // Al borrar la cuenta se va su correo, también el original en disco.
+    let account = t.call("GET", "/api/v1/accounts", Some(&cookie), None).await.body[0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let del = t
+        .call("DELETE", &format!("/api/v1/accounts/{account}"), Some(&cookie), None)
+        .await;
+    assert_eq!(del.status, StatusCode::NO_CONTENT);
+    let page = t.call("GET", "/api/v1/threads", Some(&cookie), None).await;
+    assert_eq!(page.body["threads"].as_array().unwrap().len(), 0);
+    assert_eq!(
+        t.call("GET", &url, Some(&cookie), None).await.status,
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn new_accounts_are_checked_against_the_server() {
+    let t = app().await;
+    let cookie = t.setup().await;
+    let account = json!({
+        "name": "Trabajo", "email": "yo@trabajo.es",
+        "imap_host": "127.0.0.1", "imap_port": 1,
+        "smtp_host": "127.0.0.1", "smtp_port": 1,
+        "login": "yo", "password": "x"
+    });
+    let r = t
+        .call("POST", "/api/v1/accounts", Some(&cookie), Some(account.clone()))
+        .await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", r.body);
+    assert_eq!(r.body["error"], "mail_login_failed");
+
+    let mut insecure = account.clone();
+    insecure["imap_security"] = json!("none");
+    insecure["verify"] = json!(false);
+    let r = t.call("POST", "/api/v1/accounts", Some(&cookie), Some(insecure)).await;
+    assert_eq!(
+        r.status,
+        StatusCode::BAD_REQUEST,
+        "sin cifrar no se permite por defecto"
+    );
+
+    let mut unchecked = account;
+    unchecked["verify"] = json!(false);
+    let r = t.call("POST", "/api/v1/accounts", Some(&cookie), Some(unchecked)).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    let list = t.call("GET", "/api/v1/accounts", Some(&cookie), None).await;
+    assert_eq!(list.body.as_array().unwrap().len(), 2);
 }

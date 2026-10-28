@@ -23,7 +23,13 @@ pub struct Account {
     pub smtp_host: String,
     pub smtp_port: u16,
     pub login: String,
+    /// `tls`, `starttls` o `none`.
+    pub imap_security: String,
+    pub smtp_security: String,
     pub created_at: i64,
+    /// Última sincronización completa sin errores.
+    pub synced_at: Option<i64>,
+    pub sync_error: Option<String>,
 }
 
 pub struct NewAccount<'a> {
@@ -35,12 +41,40 @@ pub struct NewAccount<'a> {
     pub smtp_port: u16,
     pub login: &'a str,
     pub password: &'a str,
+    pub imap_security: &'a str,
+    pub smtp_security: &'a str,
+}
+
+/// Carpeta de los mensajes originales (`.eml`) de un usuario.
+pub fn user_raw_dir(data_dir: &Path, user: Id) -> PathBuf {
+    data_dir.join("users").join(user.to_base58()).join("raw")
+}
+
+const ACCOUNT_COLS: &str = "id, name, email, imap_host, imap_port, smtp_host, smtp_port, login, \
+    imap_security, smtp_security, created_at, synced_at, sync_error";
+
+fn account_from_row(r: &sqlx::sqlite::SqliteRow) -> Result<Account> {
+    Ok(Account {
+        id: Id::from_slice(r.try_get::<&[u8], _>("id")?)?,
+        name: r.try_get("name")?,
+        email: r.try_get("email")?,
+        imap_host: r.try_get("imap_host")?,
+        imap_port: r.try_get("imap_port")?,
+        smtp_host: r.try_get("smtp_host")?,
+        smtp_port: r.try_get("smtp_port")?,
+        login: r.try_get("login")?,
+        imap_security: r.try_get("imap_security")?,
+        smtp_security: r.try_get("smtp_security")?,
+        created_at: r.try_get("created_at")?,
+        synced_at: r.try_get("synced_at")?,
+        sync_error: r.try_get("sync_error")?,
+    })
 }
 
 /// Base de datos aislada de un usuario: preferencias y cuentas de correo.
 #[derive(Clone)]
 pub struct UserDb {
-    pool: SqlitePool,
+    pub(crate) pool: SqlitePool,
 }
 
 impl UserDb {
@@ -75,8 +109,8 @@ impl UserDb {
         let id = Id::new();
         let t = now();
         sqlx::query(
-            "INSERT INTO accounts (id, name, email, imap_host, imap_port, smtp_host, smtp_port, login, secret, created_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO accounts (id, name, email, imap_host, imap_port, smtp_host, smtp_port, login, secret, \
+             imap_security, smtp_security, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(id.as_bytes().as_slice())
         .bind(a.name)
@@ -87,6 +121,8 @@ impl UserDb {
         .bind(a.smtp_port)
         .bind(a.login)
         .bind(secrets.seal(a.password.as_bytes())?)
+        .bind(a.imap_security)
+        .bind(a.smtp_security)
         .bind(t)
         .execute(&self.pool)
         .await?;
@@ -99,31 +135,58 @@ impl UserDb {
             smtp_host: a.smtp_host.into(),
             smtp_port: a.smtp_port,
             login: a.login.into(),
+            imap_security: a.imap_security.into(),
+            smtp_security: a.smtp_security.into(),
             created_at: t,
+            synced_at: None,
+            sync_error: None,
         })
     }
 
     pub async fn accounts(&self) -> Result<Vec<Account>> {
-        let rows = sqlx::query(
-            "SELECT id, name, email, imap_host, imap_port, smtp_host, smtp_port, login, created_at FROM accounts ORDER BY id",
-        )
-        .fetch_all(&self.pool)
-        .await?;
-        rows.iter()
-            .map(|r| {
-                Ok(Account {
-                    id: Id::from_slice(r.try_get::<&[u8], _>("id")?)?,
-                    name: r.try_get("name")?,
-                    email: r.try_get("email")?,
-                    imap_host: r.try_get("imap_host")?,
-                    imap_port: r.try_get("imap_port")?,
-                    smtp_host: r.try_get("smtp_host")?,
-                    smtp_port: r.try_get("smtp_port")?,
-                    login: r.try_get("login")?,
-                    created_at: r.try_get("created_at")?,
-                })
-            })
-            .collect()
+        let rows = sqlx::query(&format!("SELECT {ACCOUNT_COLS} FROM accounts ORDER BY id"))
+            .fetch_all(&self.pool)
+            .await?;
+        rows.iter().map(account_from_row).collect()
+    }
+
+    pub async fn account(&self, id: Id) -> Result<Option<Account>> {
+        let row = sqlx::query(&format!("SELECT {ACCOUNT_COLS} FROM accounts WHERE id = ?"))
+            .bind(id.as_bytes().as_slice())
+            .fetch_optional(&self.pool)
+            .await?;
+        row.as_ref().map(account_from_row).transpose()
+    }
+
+    /// Borra la cuenta y todo su correo en caché. Devuelve los mensajes borrados.
+    pub async fn delete_account(&self, id: Id) -> Result<Vec<Id>> {
+        let mut tx = self.pool.begin().await?;
+        let ids: Vec<Vec<u8>> = sqlx::query_scalar("SELECT id FROM messages WHERE account_id = ?")
+            .bind(id.as_bytes().as_slice())
+            .fetch_all(&mut *tx)
+            .await?;
+        for table in ["messages", "threads", "mailboxes"] {
+            sqlx::query(&format!("DELETE FROM {table} WHERE account_id = ?"))
+                .bind(id.as_bytes().as_slice())
+                .execute(&mut *tx)
+                .await?;
+        }
+        sqlx::query("DELETE FROM accounts WHERE id = ?")
+            .bind(id.as_bytes().as_slice())
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        ids.iter().map(|b| Id::from_slice(b)).collect()
+    }
+
+    /// Guarda el resultado de la última sincronización: `None` si fue bien.
+    pub async fn set_sync_result(&self, id: Id, error: Option<&str>) -> Result<()> {
+        let q = match error {
+            None => sqlx::query("UPDATE accounts SET synced_at = ?, sync_error = NULL WHERE id = ?").bind(now()),
+            Some(e) => sqlx::query("UPDATE accounts SET sync_error = ? WHERE id = ?").bind(e),
+        };
+        q.bind(id.as_bytes().as_slice()).execute(&self.pool).await?;
+        Ok(())
     }
 
     /// Contraseña IMAP/SMTP descifrada, para la sincronización.
@@ -164,6 +227,8 @@ mod tests {
                     smtp_port: 465,
                     login: "yo@ejemplo.es",
                     password: "secreto",
+                    imap_security: "tls",
+                    smtp_security: "tls",
                 },
                 &key,
             )

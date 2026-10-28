@@ -83,37 +83,67 @@ function SecurityTab({ me }: { me: Me }) {
 }
 
 function AccountsTab() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const qc = useQueryClient()
-  const accounts = useQuery({ queryKey: ['accounts'], queryFn: api.accounts })
+  const accounts = useQuery({ queryKey: ['accounts'], queryFn: api.accounts, refetchInterval: 5000 })
   const [draft, setDraft] = useState<AccountInput>(EMPTY_ACCOUNT)
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ['accounts'] })
+    qc.invalidateQueries({ queryKey: ['mailboxes'] })
+    qc.invalidateQueries({ queryKey: ['threads'] })
+  }
   const add = useMutation({
-    mutationFn: api.addAccount,
+    mutationFn: (verify: boolean) => api.addAccount({ ...draft, verify }),
     onSuccess: () => {
       setDraft(EMPTY_ACCOUNT)
-      qc.invalidateQueries({ queryKey: ['accounts'] })
+      refresh()
     },
   })
+  const remove = useMutation({ mutationFn: api.deleteAccount, onSuccess: refresh })
+  const sync = useMutation({ mutationFn: api.syncAccount, onSuccess: refresh })
+  const loginFailed = add.error instanceof ApiError && add.error.code === 'mail_login_failed'
+  const date = (s: number) => new Date(s * 1000).toLocaleString(i18n.language, { dateStyle: 'medium', timeStyle: 'short' })
 
   return (
     <section className="flex flex-col gap-6">
       {accounts.data && accounts.data.length > 0 && (
         <ul className="card divide-y divide-line">
           {accounts.data.map((a) => (
-            <li key={a.id} className="flex flex-col gap-0.5 px-4 py-3">
-              <span className="font-semibold">{a.name}</span>
+            <li key={a.id} className="flex flex-col gap-2 px-4 py-3">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span className="font-semibold">{a.name}</span>
+                <span className={`rounded px-2 py-0.5 text-xs font-semibold bg-surface-2 ${a.state === 'error' ? 'text-crit' : a.state === 'idle' ? 'text-good' : 'text-muted'}`}>
+                  {t(`account.states.${a.state}`)}
+                </span>
+              </div>
               <span className="text-sm text-muted [overflow-wrap:anywhere]">{a.email} · {a.imap_host}:{a.imap_port}</span>
+              {a.synced_at && <span className="text-sm text-muted">{t('account.syncedAt', { date: date(a.synced_at) })}</span>}
+              {a.state === 'error' && a.sync_error && <Alert>{a.sync_error}</Alert>}
+              <div className="flex flex-wrap gap-2">
+                <button className="btn" disabled={sync.isPending} onClick={() => sync.mutate(a.id)}>{t('account.syncNow')}</button>
+                <button className="btn btn-ghost text-crit" disabled={remove.isPending}
+                  onClick={() => { if (window.confirm(t('account.deleteConfirm', { name: a.name }))) remove.mutate(a.id) }}>
+                  {t('account.delete')}
+                </button>
+              </div>
             </li>
           ))}
         </ul>
       )}
-      <form className="card flex flex-col gap-5 p-4 sm:p-6" onSubmit={(e) => { e.preventDefault(); add.mutate(draft) }}>
+      <form className="card flex flex-col gap-5 p-4 sm:p-6" onSubmit={(e) => { e.preventDefault(); add.mutate(true) }}>
         <h2 className="text-lg font-bold">{t('account.add')}</h2>
+        <AccountForm value={draft} onChange={(a) => { setDraft(a); add.reset() }} />
+        {add.isPending && <Alert kind="info">{t('account.checking')}</Alert>}
         {add.isError && <Alert>{add.error instanceof ApiError ? add.error.message : t('common.error')}</Alert>}
         {add.isSuccess && <Alert kind="ok">{t('account.added')}</Alert>}
-        <AccountForm value={draft} onChange={setDraft} />
-        <Alert kind="info">{t('setup.account.later')}</Alert>
-        <button className="btn btn-primary self-start" disabled={add.isPending}>{t('account.add')}</button>
+        <div className="flex flex-wrap gap-2">
+          <button className="btn btn-primary" disabled={add.isPending}>{t('account.add')}</button>
+          {loginFailed && (
+            <button type="button" className="btn" disabled={add.isPending} onClick={() => add.mutate(false)}>
+              {t('account.saveAnyway')}
+            </button>
+          )}
+        </div>
       </form>
     </section>
   )

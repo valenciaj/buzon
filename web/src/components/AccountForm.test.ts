@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { EMPTY_ACCOUNT, guessFromEmail } from './AccountForm'
+import { EMPTY_ACCOUNT, guessFromEmail, withSecurity } from './AccountForm'
 
 describe('guessFromEmail', () => {
   it('rellena servidores y usuario desde la dirección', () => {
@@ -13,5 +13,18 @@ describe('guessFromEmail', () => {
     expect(a.imap_host).toBe('mail.a.es')
     expect(a.login).toBe('yo')
     expect(a.smtp_host).toBe('smtp.b.es')
+  })
+})
+
+describe('withSecurity', () => {
+  it('ajusta el puerto habitual al cambiar el cifrado', () => {
+    const a = withSecurity(EMPTY_ACCOUNT, 'imap', 'starttls')
+    expect(a.imap_security).toBe('starttls')
+    expect(a.imap_port).toBe(143)
+    expect(withSecurity(EMPTY_ACCOUNT, 'smtp', 'starttls').smtp_port).toBe(587)
+  })
+  it('respeta un puerto escrito a mano', () => {
+    const a = withSecurity({ ...EMPTY_ACCOUNT, imap_port: 1993 }, 'imap', 'starttls')
+    expect(a.imap_port).toBe(1993)
   })
 })

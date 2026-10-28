@@ -4,6 +4,7 @@
 pub mod app;
 pub mod crypto;
 pub mod id;
+pub mod mail;
 pub mod user;
 
 pub use app::AppDb;
