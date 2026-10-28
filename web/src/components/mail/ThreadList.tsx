@@ -7,7 +7,7 @@ import { ACCOUNT_COLORS, dayGroup, initials, shortDate } from '../../lib/mail'
 import { Alert } from '../ui'
 import { Icon } from './Icons'
 
-export function ThreadList({ title, filter, accounts, selected, grouped, showAccount, onSelect, onMenu }: {
+export function ThreadList({ title, filter, accounts, selected, grouped, showAccount, onSelect, onMenu, onCompose, before }: {
   title: string
   filter: ThreadFilter
   accounts: Account[]
@@ -18,6 +18,9 @@ export function ThreadList({ title, filter, accounts, selected, grouped, showAcc
   showAccount: boolean
   onSelect: (id: string) => void
   onMenu: () => void
+  onCompose?: () => void
+  /** Algo que mostrar antes de los hilos (los borradores de Buzón). */
+  before?: React.ReactNode
 }) {
   const { t, i18n } = useTranslation()
   const q = useInfiniteQuery({
@@ -63,11 +66,17 @@ export function ThreadList({ title, filter, accounts, selected, grouped, showAcc
           <Icon name="menu" />
         </button>
         <h1 className="min-w-0 flex-1 truncate text-xl font-bold">{title}</h1>
+        {onCompose && (
+          <button className="btn btn-primary px-3 lg:hidden" onClick={onCompose} aria-label={t('compose.new')}>
+            <Icon name="compose" /> <span className="max-sm:sr-only">{t('compose.newShort')}</span>
+          </button>
+        )}
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto pb-4" role="list" aria-label={title}>
         {q.isError && <div className="p-4"><Alert>{t('common.error')}</Alert></div>}
         {q.isLoading && <p className="p-6 text-muted">{t('common.loading')}</p>}
-        {q.isSuccess && threads.length === 0 && <div className="px-6 py-12 text-center text-muted">{empty}</div>}
+        {before}
+        {q.isSuccess && threads.length === 0 && !before && <div className="px-6 py-12 text-center text-muted">{empty}</div>}
         {threads.map((th, i) => {
           const group = grouped ? dayGroup(th.last_date) : null
           const newGroup = grouped && (i === 0 || dayGroup(threads[i - 1].last_date) !== group)

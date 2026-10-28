@@ -19,15 +19,20 @@ struct T {
 }
 
 async fn app() -> T {
+    app_with(false).await
+}
+
+async fn app_with(allow_insecure_mail: bool) -> T {
     let dir = tempfile::tempdir().unwrap();
     let db = AppDb::open(&dir.path().join("app.db")).await.unwrap();
-    let state = AppState::new(
+    let mut state = AppState::new(
         db,
         dir.path().to_path_buf(),
         MasterKey::generate(),
         true,
         Some("https://correo.test".into()),
     );
+    state.allow_insecure_mail = allow_insecure_mail;
     T {
         app: buzon_api::app(Arc::new(state), None),
         dir,
@@ -72,6 +77,32 @@ impl T {
             cookie,
             body,
             headers,
+            bytes,
+        }
+    }
+
+    async fn upload(&self, cookie: &str, name: Option<&str>, content_type: &str, data: &[u8]) -> Res {
+        let mut b = Request::builder()
+            .method("POST")
+            .uri("/api/v1/uploads")
+            .header(header::COOKIE, cookie)
+            .header(header::CONTENT_TYPE, content_type);
+        if let Some(n) = name {
+            b = b.header("x-buzon-filename", n);
+        }
+        let res = self
+            .app
+            .clone()
+            .oneshot(b.body(Body::from(data.to_vec())).unwrap())
+            .await
+            .unwrap();
+        let status = res.status();
+        let bytes = res.into_body().collect().await.unwrap().to_bytes().to_vec();
+        Res {
+            status,
+            cookie: None,
+            body: serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+            headers: Default::default(),
             bytes,
         }
     }
@@ -594,4 +625,289 @@ async fn new_accounts_are_checked_against_the_server() {
     assert_eq!(r.status, StatusCode::OK, "{}", r.body);
     let list = t.call("GET", "/api/v1/accounts", Some(&cookie), None).await;
     assert_eq!(list.body.as_array().unwrap().len(), 2);
+}
+
+/// Servidor SMTP mínimo: acepta un envío y devuelve el sobre y el mensaje recibidos.
+async fn fake_smtp() -> (u16, tokio::sync::oneshot::Receiver<(Vec<String>, String)>) {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        let (sock, _) = listener.accept().await.unwrap();
+        let (r, mut w) = sock.into_split();
+        let mut r = BufReader::new(r);
+        w.write_all(b"220 falso ESMTP\r\n").await.unwrap();
+        let (mut rcpt, mut data) = (Vec::new(), String::new());
+        let mut line = String::new();
+        loop {
+            line.clear();
+            if r.read_line(&mut line).await.unwrap() == 0 {
+                break;
+            }
+            let cmd = line.trim_end().to_ascii_uppercase();
+            let reply: &[u8] = if cmd.starts_with("EHLO") {
+                b"250-falso\r\n250 AUTH PLAIN LOGIN\r\n"
+            } else if cmd.starts_with("AUTH") {
+                b"235 vale\r\n"
+            } else if cmd.starts_with("RCPT") {
+                rcpt.push(line.trim_end()[8..].to_string());
+                b"250 vale\r\n"
+            } else if cmd == "DATA" {
+                w.write_all(b"354 adelante\r\n").await.unwrap();
+                loop {
+                    line.clear();
+                    r.read_line(&mut line).await.unwrap();
+                    if line == ".\r\n" {
+                        break;
+                    }
+                    data.push_str(&line);
+                }
+                b"250 encolado\r\n"
+            } else if cmd == "QUIT" {
+                w.write_all(b"221 adios\r\n").await.unwrap();
+                break;
+            } else {
+                b"250 vale\r\n"
+            };
+            w.write_all(reply).await.unwrap();
+        }
+        let _ = tx.send((rcpt, data));
+    });
+    (port, rx)
+}
+
+#[tokio::test]
+async fn identities_drafts_and_uploads() {
+    let t = app().await;
+    let cookie = t.setup().await;
+    let ids = t.call("GET", "/api/v1/identities", Some(&cookie), None).await;
+    assert_eq!(ids.status, StatusCode::OK, "{}", ids.body);
+    let list = ids.body.as_array().unwrap();
+    assert_eq!(list.len(), 1, "la cuenta trae su identidad");
+    assert_eq!(list[0]["email"], "yo@ejemplo.es");
+    assert_eq!(list[0]["is_default"], true);
+    let first = list[0]["id"].as_str().unwrap().to_string();
+    let account = list[0]["account_id"].as_str().unwrap().to_string();
+
+    let alias = t
+        .call(
+            "POST",
+            "/api/v1/identities",
+            Some(&cookie),
+            Some(
+                json!({"account_id": account, "name": "Javier V.", "email": "hola@ejemplo.es",
+                "signature": "Un saludo,\nJavier\n\n", "is_default": true}),
+            ),
+        )
+        .await;
+    assert_eq!(alias.status, StatusCode::OK, "{}", alias.body);
+    assert_eq!(alias.body["signature"], "Un saludo,\nJavier");
+    let alias_id = alias.body["id"].as_str().unwrap().to_string();
+    let ids = t.call("GET", "/api/v1/identities", Some(&cookie), None).await;
+    let defaults: Vec<_> = ids
+        .body
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|i| i["is_default"] == true)
+        .collect();
+    assert_eq!(defaults.len(), 1);
+    assert_eq!(defaults[0]["id"], alias_id.as_str());
+
+    let bad = t
+        .call(
+            "POST",
+            "/api/v1/identities",
+            Some(&cookie),
+            Some(json!({"account_id": account, "name": "", "email": "sin-arroba"})),
+        )
+        .await;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+
+    let del = t
+        .call("DELETE", &format!("/api/v1/identities/{alias_id}"), Some(&cookie), None)
+        .await;
+    assert_eq!(del.status, StatusCode::NO_CONTENT);
+    let last = t
+        .call("DELETE", &format!("/api/v1/identities/{first}"), Some(&cookie), None)
+        .await;
+    assert_eq!(last.status, StatusCode::CONFLICT);
+    assert_eq!(last.body["error"], "last_identity");
+    let ids = t.call("GET", "/api/v1/identities", Some(&cookie), None).await;
+    assert_eq!(ids.body[0]["is_default"], true, "vuelve a ser la predeterminada");
+
+    // Subidas: sin JSON solo si llevan la cabecera propia.
+    let up = t
+        .upload(&cookie, Some("men%C3%BA.pdf"), "application/pdf", b"%PDF-1.4")
+        .await;
+    assert_eq!(up.status, StatusCode::OK, "{}", up.body);
+    assert_eq!(up.body["name"], "menú.pdf");
+    assert_eq!(up.body["size"], 8);
+    let upload_id = up.body["id"].as_str().unwrap().to_string();
+    let csrf = t.upload(&cookie, None, "text/plain", b"hola").await;
+    assert_eq!(csrf.status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+
+    let draft = json!({"to": [{"name": "Ana", "email": "ana@ejemplo.es"}], "subject": "Menú",
+        "html": "<p>Hola</p>", "text": "Hola", "attachments": [upload_id]});
+    let d = t
+        .call("POST", "/api/v1/drafts", Some(&cookie), Some(draft.clone()))
+        .await;
+    assert_eq!(d.status, StatusCode::OK, "{}", d.body);
+    assert_eq!(d.body["attachments"][0]["name"], "menú.pdf");
+    let draft_id = d.body["id"].as_str().unwrap().to_string();
+    let mut changed = draft;
+    changed["subject"] = json!("Menú del viernes");
+    let u = t
+        .call(
+            "PUT",
+            &format!("/api/v1/drafts/{draft_id}"),
+            Some(&cookie),
+            Some(changed),
+        )
+        .await;
+    assert_eq!(u.body["subject"], "Menú del viernes");
+    let all = t.call("GET", "/api/v1/drafts", Some(&cookie), None).await;
+    assert_eq!(all.body.as_array().unwrap().len(), 1);
+
+    // Otra persona no ve ni toca los borradores.
+    let ana = t.invite_user(&cookie, "ana").await;
+    let other = t
+        .call(
+            "PUT",
+            &format!("/api/v1/drafts/{draft_id}"),
+            Some(&ana),
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(other.status, StatusCode::NOT_FOUND);
+
+    let del = t
+        .call("DELETE", &format!("/api/v1/drafts/{draft_id}"), Some(&cookie), None)
+        .await;
+    assert_eq!(del.status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        t.call("GET", "/api/v1/drafts", Some(&cookie), None).await.body,
+        json!([])
+    );
+    let user = t.call("GET", "/api/v1/me", Some(&cookie), None).await.body["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let file = t.dir.path().join("users").join(user).join("uploads").join(&upload_id);
+    assert!(!file.exists(), "el adjunto se borra con el borrador");
+}
+
+#[tokio::test]
+async fn sends_replies_through_smtp() {
+    let t = app_with(true).await;
+    let cookie = t.setup().await;
+    let (_, original) = seed_mail(&t, &cookie).await;
+    let (port, received) = fake_smtp().await;
+    let acc = t
+        .call(
+            "POST",
+            "/api/v1/accounts",
+            Some(&cookie),
+            Some(json!({
+                "name": "Pruebas", "email": "yo@pruebas.es",
+                "imap_host": "127.0.0.1", "imap_port": 1, "imap_security": "none",
+                "smtp_host": "127.0.0.1", "smtp_port": port, "smtp_security": "none",
+                "login": "yo", "password": "x", "verify": false
+            })),
+        )
+        .await;
+    assert_eq!(acc.status, StatusCode::OK, "{}", acc.body);
+    let ids = t.call("GET", "/api/v1/identities", Some(&cookie), None).await;
+    let identity = ids
+        .body
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["email"] == "yo@pruebas.es")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let up = t.upload(&cookie, Some("notas.txt"), "text/plain", b"apuntes").await;
+    let upload_id = up.body["id"].as_str().unwrap().to_string();
+
+    let none = t
+        .call(
+            "POST",
+            "/api/v1/send",
+            Some(&cookie),
+            Some(json!({"identity_id": identity, "subject": "x"})),
+        )
+        .await;
+    assert_eq!(none.status, StatusCode::BAD_REQUEST);
+
+    let r = t
+        .call(
+            "POST",
+            "/api/v1/send",
+            Some(&cookie),
+            Some(json!({
+                "identity_id": identity,
+                "to": [{"name": "Ana", "email": "ana@ejemplo.es"}],
+                "bcc": [{"email": "oculto@ejemplo.es"}],
+                "subject": "Re: Fotos",
+                "html": "<p>¡Gracias!</p><script>alert(1)</script>",
+                "text": "¡Gracias!",
+                "reply_to": original.to_base58(),
+                "attachments": [upload_id],
+            })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    assert!(r.body["message_id"].as_str().unwrap().ends_with("@pruebas.es"));
+
+    let (rcpt, data) = received.await.unwrap();
+    assert_eq!(rcpt.len(), 2, "{rcpt:?}");
+    assert!(data.contains("In-Reply-To: <f1@ejemplo.es>"), "{data}");
+    assert!(data.contains("notas.txt"));
+    assert!(!data.contains("oculto@"));
+    assert!(!data.contains("<script>"), "el HTML sale saneado");
+
+    let thread = t.call("GET", "/api/v1/threads?role=inbox", Some(&cookie), None).await;
+    let detail = t
+        .call(
+            "GET",
+            &format!("/api/v1/threads/{}", thread.body["threads"][0]["id"].as_str().unwrap()),
+            Some(&cookie),
+            None,
+        )
+        .await;
+    assert_eq!(detail.body["messages"][0]["answered"], true, "{}", detail.body);
+
+    // Si el servidor no responde, se avisa y no se pierde nada.
+    let mut dead = t
+        .call(
+            "POST",
+            "/api/v1/drafts",
+            Some(&cookie),
+            Some(json!({"identity_id": identity, "to": [{"email": "ana@ejemplo.es"}]})),
+        )
+        .await
+        .body;
+    let draft_id = dead["id"].take();
+    let r = t
+        .call(
+            "POST",
+            "/api/v1/send",
+            Some(&cookie),
+            Some(json!({"identity_id": identity, "to": [{"email": "ana@ejemplo.es"}], "draft_id": draft_id})),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::BAD_GATEWAY, "{}", r.body);
+    assert_eq!(r.body["error"], "smtp_failed");
+    assert_eq!(
+        t.call("GET", "/api/v1/drafts", Some(&cookie), None)
+            .await
+            .body
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
 }

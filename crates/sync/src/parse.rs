@@ -49,8 +49,10 @@ fn id_list(v: &HeaderValue<'_>) -> Vec<String> {
 
 /// Texto corto para la lista: sin líneas citadas y con los espacios colapsados.
 pub fn snippet(text: &str) -> String {
+    // Lo que va tras la firma («-- ») no es el mensaje: suele ser la firma y la cita.
     let joined = text
         .lines()
+        .take_while(|l| l.trim_end() != "--")
         .map(str::trim)
         .filter(|l| !l.starts_with('>'))
         .collect::<Vec<_>>()
@@ -353,5 +355,9 @@ JVBERi0xLjQK\r
         let s = snippet(&"palabra ".repeat(100));
         assert_eq!(s.chars().count(), 201);
         assert!(s.ends_with('…'));
+        assert_eq!(
+            snippet("¡Perfecto!\n\n-- \nJavier\nEl lunes, Ana escribió:\n> Hola"),
+            "¡Perfecto!"
+        );
     }
 }

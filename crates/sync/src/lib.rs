@@ -13,6 +13,7 @@ use tokio::sync::{broadcast, mpsc};
 
 pub mod conn;
 pub mod parse;
+pub mod send;
 mod worker;
 
 pub use conn::{check, Security, ServerConfig};
@@ -66,6 +67,11 @@ pub(crate) enum Cmd {
         uids: Vec<u32>,
         flag: &'static str,
         on: bool,
+    },
+    /// Guarda un mensaje en una carpeta (por ejemplo, la copia en Enviados).
+    Append {
+        mailbox: String,
+        raw: Vec<u8>,
     },
     Stop,
 }
@@ -174,6 +180,18 @@ impl SyncHub {
                 },
             );
         }
+    }
+
+    /// Guarda una copia (ya leída) de un mensaje en una carpeta y vuelve a sincronizar.
+    pub fn append(&self, account: Id, mailbox: &str, raw: Vec<u8>) {
+        self.send(
+            account,
+            Cmd::Append {
+                mailbox: mailbox.to_string(),
+                raw,
+            },
+        );
+        self.send(account, Cmd::SyncNow);
     }
 
     fn send(&self, account: Id, cmd: Cmd) {

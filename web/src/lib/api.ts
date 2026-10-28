@@ -134,6 +134,50 @@ export interface InvitationOut {
   status: 'pending' | 'used' | 'expired'
 }
 
+export interface Identity {
+  id: string
+  account_id: string
+  name: string
+  email: string
+  signature: string
+  is_default: boolean
+}
+
+export interface IdentityInput {
+  account_id?: string
+  name: string
+  email: string
+  signature: string
+  is_default: boolean
+}
+
+export interface Upload {
+  id: string
+  name: string
+  content_type: string
+  size: number
+}
+
+export interface DraftInput {
+  identity_id: string | null
+  to: Addr[]
+  cc: Addr[]
+  bcc: Addr[]
+  subject: string
+  html: string
+  text: string
+  reply_to: string | null
+  forward_of: string | null
+  /** Ids de ficheros subidos. */
+  attachments: string[]
+}
+
+export interface Draft extends Omit<DraftInput, 'attachments'> {
+  id: string
+  attachments: Upload[]
+  updated_at: number
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -155,6 +199,22 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   const data = await res.json().catch(() => null)
   if (!res.ok) throw new ApiError(res.status, data?.error ?? 'unknown', data?.message ?? res.statusText)
   return data as T
+}
+
+/** Sube un fichero tal cual; el nombre va en una cabecera propia. */
+async function uploadFile(file: File): Promise<Upload> {
+  const res = await fetch('/api/v1/uploads', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      'Content-Type': file.type || 'application/octet-stream',
+      'X-Buzon-Filename': encodeURIComponent(file.name),
+    },
+    body: file,
+  })
+  const data = await res.json().catch(() => null)
+  if (!res.ok) throw new ApiError(res.status, data?.error ?? 'unknown', data?.message ?? res.statusText)
+  return data as Upload
 }
 
 function query(params: Record<string, string | undefined>): string {
@@ -184,6 +244,18 @@ export const api = {
   thread: (id: string) => call<Thread>('GET', `/threads/${id}`),
   updateThread: (id: string, change: { seen?: boolean; flagged?: boolean }) =>
     call<void>('PATCH', `/threads/${id}`, change),
+  identities: () => call<Identity[]>('GET', '/identities'),
+  createIdentity: (i: IdentityInput) => call<Identity>('POST', '/identities', i),
+  updateIdentity: (id: string, i: IdentityInput) => call<Identity>('PUT', `/identities/${id}`, i),
+  deleteIdentity: (id: string) => call<void>('DELETE', `/identities/${id}`),
+  upload: uploadFile,
+  deleteUpload: (id: string) => call<void>('DELETE', `/uploads/${id}`),
+  drafts: () => call<Draft[]>('GET', '/drafts'),
+  createDraft: (d: DraftInput) => call<Draft>('POST', '/drafts', d),
+  updateDraft: (id: string, d: DraftInput) => call<Draft>('PUT', `/drafts/${id}`, d),
+  deleteDraft: (id: string) => call<void>('DELETE', `/drafts/${id}`),
+  send: (d: DraftInput & { draft_id?: string | null }) => call<{ message_id: string }>('POST', '/send', d),
+  contacts: (q: string) => call<Addr[]>('GET', `/contacts${query({ q })}`),
   invitations: () => call<InvitationOut[]>('GET', '/invitations'),
   createInvitation: (note?: string) =>
     call<{ id: string; url: string; expires_at: number }>('POST', '/invitations', { note }),
