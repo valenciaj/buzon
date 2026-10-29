@@ -81,6 +81,8 @@
     "font": "Font",
     "fontDefault": "default, most legible",
     "fontSize": "Text size",
+    "smaller": "Smaller text",
+    "larger": "Larger text",
     "density": "Density",
     "densities": {
       "comfortable": "Comfortable",

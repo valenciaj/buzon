@@ -88,3 +88,22 @@ h1, h2, h3 { text-wrap: balance; }
   content: attr(data-placeholder); color: var(--muted); float: left; height: 0; pointer-events: none;
 }
 .tiptap { min-height: 100%; }
+
+/* Fila de pestañas que se desliza: sin barra visible, con un degradado en el borde
+   por el que quedan más pestañas. */
+.tabs-scroll {
+  scrollbar-width: none;
+}
+.tabs-scroll::-webkit-scrollbar {
+  display: none;
+}
+.tabs-scroll[data-more='right'] {
+  mask-image: linear-gradient(to right, #000 calc(100% - 3rem), transparent);
+}
+.tabs-scroll[data-more='left'] {
+  mask-image: linear-gradient(to left, #000 calc(100% - 3rem), transparent);
+}
+.tabs-scroll[data-more='both'] {
+  mask-image: linear-gradient(to right, transparent, #000 3rem, #000 calc(100% - 3rem), transparent);
+}
+

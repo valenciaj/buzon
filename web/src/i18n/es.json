@@ -81,6 +81,8 @@
     "font": "Fuente",
     "fontDefault": "por defecto, máxima legibilidad",
     "fontSize": "Tamaño del texto",
+    "smaller": "Texto más pequeño",
+    "larger": "Texto más grande",
     "density": "Densidad",
     "densities": {
       "comfortable": "Cómoda",
