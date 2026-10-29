@@ -56,6 +56,7 @@ Todo está en `/etc/buzon/config.toml`, con comentarios. Lo más importante:
 | `listen` | dónde escucha Buzón (solo local: nginx hace de proxy) |
 | `cookie_secure` | cookie de sesión solo por HTTPS (déjalo en `true`) |
 | `allow_private_webhooks` | permite webhooks a la red local y sin HTTPS |
+| `metrics_token` | activa las métricas para Grafana en `/metrics` (ver más abajo) |
 | `[oauth.google]`, `[oauth.microsoft]` | conectar Gmail y Outlook sin contraseña |
 
 Después de cambiar algo: `sudo systemctl restart buzon`.
@@ -135,6 +136,41 @@ sudo ./deploy/install.sh correo.ejemplo.es
 ```
 
 Sustituye el programa y la web, y reinicia Buzón. No toca la configuración ni los datos. Las migraciones de la base de datos se aplican solas al arrancar. Haz antes una copia, por si acaso.
+
+## Métricas para Grafana
+
+Buzón publica sus estadísticas en `/metrics`, en el formato de Prometheus. Para activarlas, pon un token en la configuración y reinicia:
+
+```toml
+metrics_token = "pon-aquí-un-token-largo"   # openssl rand -hex 32
+```
+
+Sin token, `/metrics` no existe. Con él, hay que mandarlo en cada petición. En Prometheus:
+
+```yaml
+scrape_configs:
+  - job_name: buzon
+    scheme: https
+    authorization:
+      credentials: pon-aquí-un-token-largo
+    static_configs:
+      - targets: ["correo.ejemplo.es"]
+```
+
+Después, en Grafana, añade Prometheus como origen de datos. Las métricas:
+
+| Métrica | Qué es |
+| --- | --- |
+| `buzon_users` | usuarios |
+| `buzon_accounts{state}` | cuentas de correo por estado: `idle`, `syncing`, `connecting`, `error`, `off` |
+| `buzon_scheduled_sends` | correos programados que aún no han salido |
+| `buzon_webhook_queue` | avisos de webhooks pendientes de entregar |
+| `buzon_mails_sent_total` | correos enviados desde que arrancó el servidor |
+| `buzon_send_failures_total` | envíos que no pudieron salir |
+| `buzon_webhook_deliveries_total{result}` | entregas de webhooks: `ok` o `failed` |
+| `buzon_start_time_seconds`, `buzon_info{version}` | cuándo arrancó y qué versión es |
+
+Una alerta útil: `buzon_accounts{state="error"} > 0`.
 
 ## Registros y problemas
 

@@ -21,6 +21,7 @@ use utoipa_scalar::{Scalar, Servable};
 
 pub mod error;
 pub mod hooks;
+pub mod metrics;
 pub mod models;
 mod prefs;
 pub mod routes;
@@ -58,6 +59,10 @@ pub struct AppState {
     /// Subidas pendientes de borradores a la carpeta Borradores: la última versión pedida de cada uno.
     pub(crate) draft_copies: Mutex<HashMap<Id, u64>>,
     pub(crate) draft_seq: std::sync::atomic::AtomicU64,
+    /// Token para `GET /metrics`; sin él, la ruta no existe.
+    pub metrics_token: Option<String>,
+    pub counters: metrics::Counters,
+    pub(crate) started_at: i64,
     user_dbs: Mutex<HashMap<Id, UserDb>>,
     opening: tokio::sync::Mutex<()>,
     /// Peticiones de cada token en el minuto en curso.
@@ -88,6 +93,9 @@ impl AppState {
             oauth_pending: Mutex::new(HashMap::new()),
             draft_copies: Mutex::new(HashMap::new()),
             draft_seq: std::sync::atomic::AtomicU64::new(0),
+            metrics_token: None,
+            counters: metrics::Counters::default(),
+            started_at: buzon_store::now(),
             user_dbs: Mutex::new(HashMap::new()),
             opening: tokio::sync::Mutex::new(()),
             rate: Mutex::new(HashMap::new()),
@@ -435,7 +443,10 @@ pub fn start_background(state: Arc<AppState>) {
 
 /// Router completo: API, documentación y, si se indica, el frontend compilado.
 pub fn app(state: Arc<AppState>, web_dir: Option<PathBuf>) -> Router {
-    let router = api_router(state);
+    let metrics = Router::new()
+        .route("/metrics", get(metrics::metrics))
+        .with_state(state.clone());
+    let router = api_router(state).merge(metrics);
     match web_dir {
         Some(dir) => {
             let index = ServeFile::new(dir.join("index.html"));

@@ -18,6 +18,7 @@ use serde::Deserialize;
 use utoipa::IntoParams;
 
 use crate::error::{ApiError, ApiResult, ErrorBody};
+use crate::metrics::Counters;
 use crate::models::{ContactOut, DraftIn, DraftOut, IdentityInput, IdentityOut, SendRequest, SendResult, UploadOut};
 use crate::session::CurrentUser;
 use crate::AppState;
@@ -469,11 +470,10 @@ pub(crate) async fn deliver(
     let (message, message_id) = send::build(&outgoing).map_err(|e| ApiError::bad_request(e.to_string()))?;
 
     let creds = st.creds(user, &account).await?;
-    let auth = st
-        .sync
-        .auth(&udb, account.id, &creds)
-        .await
-        .map_err(|e| ApiError::new(StatusCode::BAD_GATEWAY, "smtp_failed", format!("{e}.")))?;
+    let auth = st.sync.auth(&udb, account.id, &creds).await.map_err(|e| {
+        Counters::inc(&st.counters.send_failures);
+        ApiError::new(StatusCode::BAD_GATEWAY, "smtp_failed", format!("{e}."))
+    })?;
     let cfg = SmtpConfig {
         host: account.smtp_host.clone(),
         port: account.smtp_port,
@@ -483,8 +483,10 @@ pub(crate) async fn deliver(
         mech: buzon_sync::Mech::parse(&account.auth_mech).unwrap_or_default(),
     };
     if let Err(e) = send::send(&cfg, &message).await {
+        Counters::inc(&st.counters.send_failures);
         return Err(ApiError::new(StatusCode::BAD_GATEWAY, "smtp_failed", format!("{e}.")));
     }
+    Counters::inc(&st.counters.mails_sent);
 
     // A partir de aquí el correo ya ha salido: lo demás no debe fallar el envío.
     if !send::server_saves_sent(&account.smtp_host) {

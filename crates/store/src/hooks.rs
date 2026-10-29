@@ -257,6 +257,16 @@ impl AppDb {
         .await?)
     }
 
+    /// Avisos que aún esperan a entregarse (de webhooks activos).
+    pub async fn pending_deliveries(&self) -> Result<i64> {
+        Ok(sqlx::query_scalar(
+            "SELECT COUNT(*) FROM webhook_deliveries d JOIN webhooks w ON w.id = d.webhook_id \
+             WHERE d.status = 'pending' AND w.active = 1",
+        )
+        .fetch_one(&self.pool)
+        .await?)
+    }
+
     /// Apunta un intento. Si falla, programa el siguiente o lo da por perdido.
     pub async fn record_attempt(&self, id: Id, a: Attempt<'_>) -> Result<()> {
         let t = now();
