@@ -28,6 +28,8 @@ pub struct Account {
     pub smtp_security: String,
     /// `password`, o el proveedor de OAuth2: `google` o `microsoft`.
     pub auth: String,
+    /// Con contraseña, cómo se manda: `auto`, `plain` o `login`.
+    pub auth_mech: String,
     pub created_at: i64,
     /// Última sincronización completa sin errores.
     pub synced_at: Option<i64>,
@@ -55,7 +57,7 @@ pub fn user_raw_dir(data_dir: &Path, user: Id) -> PathBuf {
 }
 
 const ACCOUNT_COLS: &str = "id, name, email, imap_host, imap_port, smtp_host, smtp_port, login, \
-    imap_security, smtp_security, auth, created_at, synced_at, sync_error";
+    imap_security, smtp_security, auth, auth_mech, created_at, synced_at, sync_error";
 
 fn account_from_row(r: &sqlx::sqlite::SqliteRow) -> Result<Account> {
     Ok(Account {
@@ -70,6 +72,7 @@ fn account_from_row(r: &sqlx::sqlite::SqliteRow) -> Result<Account> {
         imap_security: r.try_get("imap_security")?,
         smtp_security: r.try_get("smtp_security")?,
         auth: r.try_get("auth")?,
+        auth_mech: r.try_get("auth_mech")?,
         created_at: r.try_get("created_at")?,
         synced_at: r.try_get("synced_at")?,
         sync_error: r.try_get("sync_error")?,
@@ -144,6 +147,7 @@ impl UserDb {
             imap_security: a.imap_security.into(),
             smtp_security: a.smtp_security.into(),
             auth: a.auth.into(),
+            auth_mech: "auto".into(),
             created_at: t,
             synced_at: None,
             sync_error: None,
@@ -218,6 +222,16 @@ impl UserDb {
         if !a.password.is_empty() {
             self.set_account_secret(id, a.password, secrets).await?;
         }
+        Ok(())
+    }
+
+    /// Cómo se manda la contraseña: `auto`, `plain` o `login`.
+    pub async fn set_account_mech(&self, id: Id, mech: &str) -> Result<()> {
+        sqlx::query("UPDATE accounts SET auth_mech = ? WHERE id = ?")
+            .bind(mech)
+            .bind(id.as_bytes().as_slice())
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 

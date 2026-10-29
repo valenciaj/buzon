@@ -35,6 +35,9 @@ fn validate_account_fields(a: &AccountInput) -> ApiResult<()> {
     if a.imap_port == 0 || a.smtp_port == 0 {
         return Err(ApiError::bad_request("Los puertos IMAP y SMTP no pueden ser 0."));
     }
+    if buzon_sync::Mech::parse(&a.auth_mech).is_none() {
+        return Err(ApiError::bad_request("La autenticación debe ser auto, plain o login."));
+    }
     for s in [&a.imap_security, &a.smtp_security] {
         if Security::parse(s).is_none() {
             return Err(ApiError::bad_request("El cifrado debe ser tls, starttls o none."));
@@ -90,7 +93,9 @@ pub async fn create(
         verify_login(&req, &req.password).await?;
     }
     let udb = st.user_db(cu.user.id).await?;
-    let acc = udb.add_account(new_account(&req), &st.secrets_for(cu.user.id)).await?;
+    let mut acc = udb.add_account(new_account(&req), &st.secrets_for(cu.user.id)).await?;
+    udb.set_account_mech(acc.id, &req.auth_mech).await?;
+    acc.auth_mech = req.auth_mech.clone();
     st.start_account(cu.user.id, &acc).await?;
     let state = st.sync.state(acc.id);
     Ok(Json(AccountOut::new(acc, state)))
@@ -104,6 +109,7 @@ async fn verify_login(req: &AccountInput, password: &str) -> ApiResult<()> {
         security: Security::parse(&req.imap_security).unwrap_or(Security::Tls),
         login: req.login.trim().to_string(),
         auth: Auth::Password(password.to_string()),
+        mech: buzon_sync::Mech::parse(&req.auth_mech).unwrap_or_default(),
     };
     buzon_sync::check(&cfg).await.map_err(|e| {
         ApiError::new(
@@ -148,6 +154,7 @@ pub async fn update(
             password: String::new(),
             imap_security: acc.imap_security.clone(),
             smtp_security: acc.smtp_security.clone(),
+            auth_mech: acc.auth_mech.clone(),
             verify: false,
         };
         udb.update_account(
@@ -170,6 +177,7 @@ pub async fn update(
             verify_login(&req, &password).await?;
         }
         udb.update_account(id, new_account(&req), &secrets).await?;
+        udb.set_account_mech(id, &req.auth_mech).await?;
         // La identidad con la dirección de antes pasa a la nueva.
         let email = req.email.trim();
         if !email.eq_ignore_ascii_case(&acc.email) {

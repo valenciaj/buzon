@@ -127,6 +127,13 @@
     "updated": "Changes saved. Buzón is syncing the account again.",
     "passwordKeep": "Leave it empty to keep the current one.",
     "oauthNameOnly": "This is a {{provider}} account: only the name can be changed.",
+    "authMech": "Authentication",
+    "authMechs": {
+      "auto": "Automatic (recommended)",
+      "plain": "PLAIN",
+      "login": "LOGIN"
+    },
+    "authMechHint": "How the password is sent to the IMAP and SMTP servers. If a correct password is rejected, try PLAIN: it accepts any character.",
     "syncedAt": "Last sync: {{date}}",
     "oauth": {
       "title": "Connect without a password",

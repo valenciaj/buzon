@@ -129,6 +129,20 @@ async fn client(stream: TcpStream, state: Arc<Mutex<Server>>, notify: Arc<Notify
                     format!("{tag} NO [AUTHENTICATIONFAILED] credenciales no válidas\r\n")
                 }
             }
+            "AUTHENTICATE" if parts[2].eq_ignore_ascii_case("PLAIN") => {
+                use base64::Engine;
+                w.write_all(b"+ \r\n").await.unwrap();
+                let answer = lines.next_line().await.unwrap().unwrap_or_default();
+                let decoded = base64::engine::general_purpose::STANDARD
+                    .decode(answer.trim())
+                    .unwrap_or_default();
+                // Contraseña con caracteres que LOGIN no siempre lleva bien.
+                out = if decoded == "\0yo\0clave ñ\"\\".as_bytes() || decoded == b"\0yo\0clave" {
+                    ok.clone()
+                } else {
+                    format!("{tag} NO [AUTHENTICATIONFAILED] credenciales no válidas\r\n")
+                }
+            }
             "AUTHENTICATE" if parts[2].eq_ignore_ascii_case("XOAUTH2") => {
                 use base64::Engine;
                 w.write_all(b"+ \r\n").await.unwrap();
@@ -438,11 +452,20 @@ async fn syncs_threads_flags_and_new_mail_with_idle() {
         security: Security::None,
         login: "yo".into(),
         auth: Auth::Password("mal".into()),
+        mech: Default::default(),
     };
     let err = buzon_sync::check(&cfg).await.unwrap_err().to_string();
     assert!(err.contains("contraseña"), "{err}");
     cfg.auth = Auth::Password("clave".into());
     buzon_sync::check(&cfg).await.unwrap();
+    // AUTHENTICATE PLAIN, elegido a mano: admite cualquier carácter.
+    cfg.mech = buzon_sync::Mech::Plain;
+    cfg.auth = Auth::Password("clave ñ\"\\".into());
+    buzon_sync::check(&cfg).await.unwrap();
+    cfg.auth = Auth::Password("mal".into());
+    let err = buzon_sync::check(&cfg).await.unwrap_err().to_string();
+    assert!(err.ends_with("credenciales no válidas"), "{err}");
+    cfg.mech = buzon_sync::Mech::Auto;
     // Gmail y Outlook: XOAUTH2 con el token de acceso.
     cfg.auth = Auth::XOAuth2("tok-malo".into());
     let err = buzon_sync::check(&cfg).await.unwrap_err().to_string();

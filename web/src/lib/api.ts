@@ -30,6 +30,8 @@ export interface Me {
 
 export type Security = 'tls' | 'starttls' | 'none'
 
+export type AuthMech = 'auto' | 'plain' | 'login'
+
 export interface AccountInput {
   name: string
   email: string
@@ -41,6 +43,8 @@ export interface AccountInput {
   smtp_security: Security
   login: string
   password: string
+  /** Cómo se manda la contraseña: automático, AUTHENTICATE/AUTH PLAIN o LOGIN. */
+  auth_mech: AuthMech
   /** Comprobar usuario y contraseña con el servidor antes de guardar (por defecto, sí). */
   verify?: boolean
 }
