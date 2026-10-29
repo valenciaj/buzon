@@ -113,8 +113,9 @@ export function ThreadList({
             <h1 className="min-w-0 flex-1 truncate text-xl font-bold">{title}</h1>
             {actions}
             {onCompose && (
-              <button className="btn btn-primary px-3 lg:hidden" onClick={onCompose} aria-label={t('compose.new')}>
-                <Icon name="compose" /> <span className="max-sm:sr-only">{t('compose.newShort')}</span>
+              <button className="btn btn-primary size-10 rounded-full px-0 lg:hidden" onClick={onCompose}
+                title={t('compose.new')} aria-label={t('compose.new')}>
+                <Icon name="compose" />
               </button>
             )}
           </div>

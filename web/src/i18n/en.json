@@ -260,7 +260,6 @@
   },
   "compose": {
     "new": "Compose",
-    "newShort": "Compose",
     "reply": "Reply",
     "forward": "Forward",
     "replyAction": "Reply",
