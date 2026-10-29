@@ -11,6 +11,7 @@ import { Icon } from '../mail/Icons'
 import { RecipientField } from './RecipientField'
 import { Popover } from '../mail/Menus'
 import { fileSize, snoozeOptions } from '../../lib/mail'
+import { useConfirm } from '../Confirm'
 
 /** Lo mismo que admite el servidor. */
 const MAX_UPLOAD = 25 * 1024 * 1024
@@ -41,6 +42,7 @@ export function Composer({ initial, error, onClose, onSend }: {
   onSend: (o: Outgoing) => void
 }) {
   const { t, i18n } = useTranslation()
+  const confirm = useConfirm()
   const qc = useQueryClient()
   const identities = useQuery({ queryKey: ['identities'], queryFn: api.identities })
   const [state, setState] = useState(initial)
@@ -172,7 +174,7 @@ export function Composer({ initial, error, onClose, onSend }: {
       setProblem(t('compose.stillUploading'))
       return
     }
-    if (!s.subject.trim() && !window.confirm(t('compose.noSubjectConfirm'))) return
+    if (!s.subject.trim() && !(await confirm({ text: t('compose.noSubjectConfirm'), ok: t('compose.send') }))) return
     // Queda guardado por si se cierra la pestaña antes de que salga.
     dirty.current = true
     await save()

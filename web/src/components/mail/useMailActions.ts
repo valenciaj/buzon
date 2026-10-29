@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { api, ApiError, type FlowChange, type From, type Thread, type ThreadPage } from '../../lib/api'
 import type { MailAction } from '../../lib/mail'
 import { useToast } from '../Toaster'
+import { useConfirm } from '../Confirm'
 
 /** Segundos para deshacer antes de que el cambio llegue al servidor. */
 const UNDO_MS = 5000
@@ -16,6 +17,7 @@ export type MoveTarget = MailAction | { mailbox: string; name: string }
  */
 export function useMailActions(from: From) {
   const { t, i18n } = useTranslation()
+  const confirm = useConfirm()
   const qc = useQueryClient()
   const toast = useToast()
   const pending = useRef(new Map<number, () => void>())
@@ -64,9 +66,13 @@ export function useMailActions(from: From) {
   }
 
   /** Mueve (o borra para siempre) con unos segundos para deshacer. */
-  function move(target: MoveTarget, ids: string[], opts: { onUndo?: () => void } = {}) {
+  function move(target: MoveTarget, ids: string[], opts: { onUndo?: () => void; confirmed?: boolean } = {}) {
     if (!ids.length) return
-    if (target === 'delete' && !window.confirm(t('actions.deleteConfirm', { count: ids.length }))) return
+    if (target === 'delete' && !opts.confirmed) {
+      void confirm({ text: t('actions.deleteConfirm', { count: ids.length }), ok: t('common.delete'), danger: true })
+        .then((ok) => { if (ok) move(target, ids, { ...opts, confirmed: true }) })
+      return
+    }
     hide(ids)
     setHidden((h) => new Set([...h, ...ids]))
     const key = ++seq.current

@@ -1,6 +1,6 @@
 # Atajos de teclado
 
-Pulsa <kbd>?</kbd> en Buzón para ver esta lista. Los atajos no funcionan mientras escribes en un campo de texto.
+Pulsa <kbd>?</kbd> en Buzón, o elige **Atajos de teclado** en el menú lateral, para ver esta lista. Los atajos no funcionan mientras escribes en un campo de texto.
 
 ## Moverse
 

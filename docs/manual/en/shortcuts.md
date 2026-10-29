@@ -1,6 +1,6 @@
 # Keyboard shortcuts
 
-Press <kbd>?</kbd> in Buzón to see this list. Shortcuts don't work while you're typing in a text field.
+Press <kbd>?</kbd> in Buzón, or choose **Keyboard shortcuts** in the side menu, to see this list. Shortcuts don't work while you're typing in a text field.
 
 ## Moving around
 

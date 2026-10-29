@@ -371,7 +371,7 @@ function Mail({ me }: { me: Me }) {
       const el = e.target as HTMLElement | null
       if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return
       // Con un menú o el redactor abiertos, las teclas son suyas.
-      if (document.querySelector('[role="menu"]') || el?.closest('[role="dialog"]:not([data-shortcuts])')) return
+      if (document.querySelector('[role="menu"], dialog[open]:not([data-shortcuts])') || el?.closest('[role="dialog"]:not([data-shortcuts])')) return
       const k = e.key
       if (prefix === 'g') {
         prefix = ''
@@ -403,7 +403,7 @@ function Mail({ me }: { me: Me }) {
   const side = (
     <Sidebar me={me} accounts={list} mailboxes={boxes} account={unified ? undefined : account} box={box}
       onAccount={chooseAccount} onBox={(b) => { go({ b }); setDrawer(false) }} onLogout={logout}
-      onCompose={list.length ? newMessage : undefined} />
+      onCompose={list.length ? newMessage : undefined} onShortcuts={() => { setHelp(true); setDrawer(false) }} />
   )
 
   const ids = [...checked]

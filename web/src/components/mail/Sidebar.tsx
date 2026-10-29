@@ -17,7 +17,7 @@ export const VIEW_ICONS: Record<View, string> = {
   reply_later: 'later', aside: 'pin', snoozed: 'clock', bubbled: 'clock',
 }
 
-export function Sidebar({ me, accounts, mailboxes, account, box, onAccount, onBox, onLogout, onCompose }: {
+export function Sidebar({ me, accounts, mailboxes, account, box, onAccount, onBox, onLogout, onCompose, onShortcuts }: {
   me: Me
   accounts: Account[]
   mailboxes: Mailbox[]
@@ -28,6 +28,7 @@ export function Sidebar({ me, accounts, mailboxes, account, box, onAccount, onBo
   onBox: (b: Box) => void
   onLogout: () => void
   onCompose?: () => void
+  onShortcuts: () => void
 }) {
   const { t, i18n } = useTranslation()
   const focus = me.preferences.mode === 'focus'
@@ -179,6 +180,9 @@ export function Sidebar({ me, accounts, mailboxes, account, box, onAccount, onBo
         <Link to="/contacts" className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-surface">
           <Icon name="contacts" className="shrink-0 text-muted" /> {t('home.contacts')}
         </Link>
+        <button onClick={onShortcuts} className="flex items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-surface">
+          <Icon name="keyboard" className="shrink-0 text-muted" /> {t('shortcuts.title')}
+        </button>
         <a href={manualUrl(i18n.language)} target="_blank" rel="noopener" className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-surface">
           <Icon name="help" className="shrink-0 text-muted" /> {t('home.manual')}
         </a>
