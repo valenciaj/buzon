@@ -926,6 +926,10 @@ async fn sends_replies_through_smtp() {
     assert!(data.contains("notas.txt"));
     assert!(!data.contains("oculto@"));
     assert!(!data.contains("<script>"), "el HTML sale saneado");
+    assert!(
+        !data.contains("Disposition-Notification-To"),
+        "sin confirmación si no se pide"
+    );
 
     let thread = t.call("GET", "/api/v1/threads?role=inbox", Some(&cookie), None).await;
     let detail = t
@@ -1800,6 +1804,7 @@ async fn scheduled_sends_can_be_undone_and_followed_up() {
         json!({
             "identity_id": identity, "to": [{"email": "ana@ejemplo.es"}],
             "subject": subject, "text": "Hola", "send_at": send_at, "follow_up_days": 3,
+            "read_receipt": true,
         })
     };
 
@@ -1845,9 +1850,10 @@ async fn scheduled_sends_can_be_undone_and_followed_up() {
         "{}",
         r.body
     );
+    let back = t.call("GET", "/api/v1/drafts", Some(&cookie), None).await.body;
     assert_eq!(
-        t.call("GET", "/api/v1/drafts", Some(&cookie), None).await.body[0]["subject"],
-        "Mañana"
+        (back[0]["subject"].as_str(), back[0]["read_receipt"].as_bool()),
+        (Some("Mañana"), Some(true))
     );
     let r = t
         .call(
@@ -1875,6 +1881,10 @@ async fn scheduled_sends_can_be_undone_and_followed_up() {
         .unwrap();
     assert_eq!(rcpt.len(), 1);
     assert!(data.contains("Subject: Presupuesto"), "{data}");
+    assert!(
+        data.contains("Disposition-Notification-To: "),
+        "pide confirmación de lectura: {data}"
+    );
     for _ in 0..50 {
         if t.call("GET", "/api/v1/scheduled", Some(&cookie), None)
             .await

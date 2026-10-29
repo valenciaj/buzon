@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use buzon_store::mail::Addr;
 use lettre::address::Envelope;
-use lettre::message::header::ContentType;
+use lettre::message::header::{ContentType, Header, HeaderName, HeaderValue};
 use lettre::message::{Attachment, Mailbox, MultiPart, SinglePart};
 use lettre::transport::smtp::authentication::{Credentials, Mechanism};
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
@@ -51,6 +51,8 @@ pub struct Outgoing {
     pub in_reply_to: Option<String>,
     pub references: Vec<String>,
     pub attachments: Vec<OutAttachment>,
+    /// Pide confirmación de lectura a la dirección del remitente.
+    pub read_receipt: bool,
 }
 
 fn mailbox(a: &Addr) -> Result<Mailbox, SendError> {
@@ -100,10 +102,30 @@ pub fn is_draft_copy(raw: &[u8]) -> bool {
     })
 }
 
+/// `Disposition-Notification-To` (RFC 8098): a quién mandar la confirmación de lectura.
+/// Solo la dirección, en ASCII, para que ningún nombre con acentos la estropee.
+#[derive(Clone)]
+struct ReadReceiptTo(String);
+
+impl Header for ReadReceiptTo {
+    fn name() -> HeaderName {
+        HeaderName::new_from_ascii_str("Disposition-Notification-To")
+    }
+
+    fn parse(s: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(Self(s.trim().to_string()))
+    }
+
+    fn display(&self) -> HeaderValue {
+        HeaderValue::new(Self::name(), self.0.clone())
+    }
+}
+
 fn build_with(o: &Outgoing, envelope: Option<Envelope>) -> Result<(Message, String), SendError> {
     let from = mailbox(&o.from)?;
     let domain = from.email.domain().to_string();
     let message_id = format!("{}@{domain}", buzon_store::Id::new());
+    let receipt_to = ReadReceiptTo(from.email.to_string());
     let mut b = Message::builder()
         .from(from)
         .subject(o.subject.trim())
@@ -112,6 +134,9 @@ fn build_with(o: &Outgoing, envelope: Option<Envelope>) -> Result<(Message, Stri
         .user_agent(format!("Buzón {}", env!("CARGO_PKG_VERSION")));
     if let Some(e) = envelope {
         b = b.envelope(e);
+    }
+    if o.read_receipt {
+        b = b.header(receipt_to);
     }
     for a in &o.to {
         b = b.to(mailbox(a)?);
@@ -213,6 +238,7 @@ mod tests {
                 content_type: "application/pdf".into(),
                 data: b"%PDF".to_vec(),
             }],
+            read_receipt: true,
         })
         .unwrap();
         assert!(id.ends_with("@ejemplo.es"));
@@ -220,6 +246,7 @@ mod tests {
         assert!(raw.contains(&format!("Message-ID: <{id}>")), "{raw}");
         assert!(raw.contains("In-Reply-To: <a1@ejemplo.es>"));
         assert!(raw.contains("References: <a0@ejemplo.es> <a1@ejemplo.es>"));
+        assert!(raw.contains("Disposition-Notification-To: yo@ejemplo.es\r\n"), "{raw}");
         assert!(raw.contains("multipart/alternative"));
         assert!(raw.contains("application/pdf"));
         assert!(!raw.contains("oculto@"), "Bcc no va en las cabeceras");
@@ -256,6 +283,7 @@ mod tests {
             in_reply_to: None,
             references: vec![],
             attachments: vec![],
+            read_receipt: false,
         });
         assert!(matches!(err, Err(SendError::Address(_))));
         assert!(server_saves_sent("smtp.gmail.com"));
@@ -275,6 +303,7 @@ mod tests {
             in_reply_to: None,
             references: vec![],
             attachments: vec![],
+            read_receipt: false,
         };
         let raw = build_draft(&o, "abc123").unwrap();
         let text = String::from_utf8(raw.clone()).unwrap();
@@ -283,6 +312,7 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("Subject: A medias"));
+        assert!(!text.contains("Disposition-Notification-To"));
         assert!(is_draft_copy(&raw));
         assert!(is_draft_copy(b"Subject: x\r\nx-buzon-draft: abc\r\n\r\nhola"));
         assert!(!is_draft_copy(b"Subject: x\r\n\r\nX-Buzon-Draft: en el cuerpo"));

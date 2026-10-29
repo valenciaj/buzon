@@ -46,7 +46,7 @@ export default function Contacts() {
     <div className="mx-auto flex min-h-full max-w-3xl flex-col gap-6 px-4 py-6 sm:py-10">
       <div className="flex items-center justify-between gap-4">
         <Logo />
-        <Link to="/" className="btn btn-ghost">{t('settings.back')}</Link>
+        <Link to="/" className="btn btn-ghost"><Icon name="arrowLeft" /> {t('settings.back')}</Link>
       </div>
       <h1 className="text-3xl font-bold">{t('contacts.title')}</h1>
       <div className="flex flex-wrap gap-2">

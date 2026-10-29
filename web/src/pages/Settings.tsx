@@ -35,7 +35,7 @@ export default function Settings({ me }: { me: Me }) {
             aria-label={t('home.manual')} title={t('home.manual')}>
             <Icon name="help" className="sm:hidden" /><span className="hidden sm:inline">{t('home.manual')}</span>
           </a>
-          <Link to="/" className="btn btn-ghost whitespace-nowrap">{t('settings.back')}</Link>
+          <Link to="/" className="btn btn-ghost whitespace-nowrap"><Icon name="arrowLeft" /> {t('settings.back')}</Link>
         </div>
       </div>
       <h1 className="text-3xl font-bold">{t('settings.title')}</h1>

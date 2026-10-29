@@ -328,6 +328,12 @@ export function Composer({ initial, error, onClose, onSend }: {
             </>
           )}
         </Popover>
+        <button type="button" aria-pressed={state.readReceipt}
+          className={`btn btn-ghost px-2.5 ${state.readReceipt ? 'text-accent' : ''}`}
+          onClick={() => change({ readReceipt: !state.readReceipt })}
+          aria-label={t('compose.readReceipt')} title={state.readReceipt ? t('compose.readReceiptOn') : t('compose.readReceipt')}>
+          <Icon name="checks" />
+        </button>
         <button type="button" className="btn btn-ghost px-2.5" onClick={() => fileInput.current?.click()}
           aria-label={t('compose.attach')} title={t('compose.attach')}>
           <Icon name="clip" />

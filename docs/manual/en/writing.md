@@ -5,7 +5,7 @@
 Click the round pencil button **Compose**, next to the logo or at the bottom right (or <kbd>c</kbd>). A window opens with:
 
 - **From:** the address you send from, if you have several accounts or identities.
-- **To, Cc and Bcc:** type a name or an address; Buzón suggests your contacts. Press <kbd>Enter</kbd> or a comma to add it.
+- **To, Cc and Bcc:** type a name or an address; Buzón suggests your contacts. Press <kbd>Enter</kbd> or a comma to add it. Cc and Bcc fold away with their ×.
 - **Subject** and **message**, with bold, italics, lists, quotes and links.
 
 ![Composing an email](/img/en/redactar.png)
@@ -31,6 +31,10 @@ Click the clock next to **Send** and choose when it should go out: this evening,
 ## Remind me if there's no reply
 
 Click the bell next to **Send** and choose how many days (1, 3, 7 or 14). If nobody replies in that time, the conversation shows up in **No reply**. If someone replies sooner, the reminder disappears on its own.
+
+## Read receipt
+
+Click the double tick next to **Send** to ask the recipient to confirm they've read the email; the button stays blue. Their email program decides whether to ask them and whether to send it: many don't. If it arrives, you'll see it as a regular email.
 
 ## Signatures and identities
 

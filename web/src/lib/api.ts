@@ -237,6 +237,8 @@ export interface DraftInput {
   forward_of: string | null
   /** Ids de ficheros subidos. */
   attachments: string[]
+  /** Pedir confirmación de lectura. */
+  read_receipt: boolean
 }
 
 export interface Draft extends Omit<DraftInput, 'attachments'> {

@@ -323,7 +323,9 @@
     "followUpOff": "Don't remind me",
     "sendFailed": "Not sent: {{error}}",
     "hideCc": "Remove Cc",
-    "hideBcc": "Remove Bcc"
+    "hideBcc": "Remove Bcc",
+    "readReceipt": "Request a read receipt",
+    "readReceiptOn": "A read receipt will be requested"
   },
   "identity": {
     "intro": "The addresses you write from: each account's own and its aliases. Each one can have its own signature.",

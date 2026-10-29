@@ -724,6 +724,7 @@ async fn keeps_drafts_in_the_servers_drafts_folder() {
             in_reply_to: None,
             references: vec![],
             attachments: vec![],
+            read_receipt: false,
         };
         buzon_sync::send::build_draft(&o, "d1").unwrap()
     };
