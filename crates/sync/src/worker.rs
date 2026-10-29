@@ -16,7 +16,7 @@ use tokio::time::Instant;
 
 use crate::conn::{self, ServerConfig, Session};
 use crate::parse::{self, Envelope};
-use crate::{Cmd, HookEvent, Result, Shared, State};
+use crate::{Cmd, Creds, HookEvent, Result, Shared, State};
 
 /// Mensajes más recientes que se descargan la primera vez en cada carpeta.
 const INITIAL: usize = 300;
@@ -36,7 +36,9 @@ pub(crate) struct Ctx {
     pub user: Id,
     pub account: Id,
     pub db: UserDb,
+    /// Servidor y usuario; las credenciales se piden en cada conexión a `creds`.
     pub cfg: ServerConfig,
+    pub creds: Creds,
     pub raw_dir: PathBuf,
     pub shared: Arc<Shared>,
 }
@@ -108,7 +110,11 @@ async fn session(
     pending: &mut Vec<Cmd>,
     retry: &mut Duration,
 ) -> Result<()> {
-    let mut s = conn::connect(&ctx.cfg).await?;
+    let cfg = ServerConfig {
+        auth: ctx.shared.auth(&ctx.db, ctx.account, &ctx.creds).await?,
+        ..ctx.cfg.clone()
+    };
+    let mut s = conn::connect(&cfg).await?;
     let caps = {
         let c = s.capabilities().await?;
         Caps {

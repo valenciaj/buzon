@@ -9,6 +9,7 @@ use tokio_rustls::rustls::pki_types::ServerName;
 use tokio_rustls::rustls::{self, ClientConfig, RootCertStore};
 use tokio_rustls::TlsConnector;
 
+use crate::oauth::{self, XOAuth2};
 use crate::{Error, Result};
 
 pub trait Io: AsyncRead + AsyncWrite + Unpin + Send + std::fmt::Debug {}
@@ -42,7 +43,25 @@ pub struct ServerConfig {
     pub port: u16,
     pub security: Security,
     pub login: String,
-    pub password: String,
+    pub auth: Auth,
+}
+
+/// Cómo se entra en el servidor.
+#[derive(Clone)]
+pub enum Auth {
+    Password(String),
+    /// Token de acceso de OAuth2 (Gmail, Outlook), con XOAUTH2.
+    XOAuth2(String),
+}
+
+/// Sin secretos, para que no acaben en los registros.
+impl std::fmt::Debug for Auth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Auth::Password(_) => "Password(…)",
+            Auth::XOAuth2(_) => "XOAuth2(…)",
+        })
+    }
 }
 
 impl std::fmt::Debug for ServerConfig {
@@ -82,7 +101,7 @@ async fn greeting<T: Io>(client: &mut async_imap::Client<T>) -> Result<()> {
 
 async fn open(cfg: &ServerConfig) -> Result<Session> {
     let tcp = TcpStream::connect((cfg.host.as_str(), cfg.port)).await?;
-    let mut client = match cfg.security {
+    let client = match cfg.security {
         Security::Tls => {
             let mut c = async_imap::Client::new(wrap_tls(&cfg.host, tcp).await?);
             greeting(&mut c).await?;
@@ -100,11 +119,22 @@ async fn open(cfg: &ServerConfig) -> Result<Session> {
             c
         }
     };
-    let _ = &mut client;
-    client
-        .login(&cfg.login, &cfg.password)
-        .await
-        .map_err(|(e, _)| Error::Login(e.to_string()))
+    match &cfg.auth {
+        Auth::Password(p) => client
+            .login(&cfg.login, p)
+            .await
+            .map_err(|(e, _)| Error::Login(e.to_string())),
+        Auth::XOAuth2(token) => {
+            let a = XOAuth2 {
+                data: oauth::xoauth2(&cfg.login, token),
+                sent: false,
+            };
+            client
+                .authenticate("XOAUTH2", a)
+                .await
+                .map_err(|(e, _)| Error::Login(e.to_string()))
+        }
+    }
 }
 
 /// Conecta e inicia sesión, con un límite de tiempo.

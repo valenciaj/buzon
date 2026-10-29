@@ -13,7 +13,7 @@ web_dir = "/usr/share/buzon/web"
 # Sin ella no se pueden descifrar las contraseñas de las cuentas: haz copia de seguridad.
 master_key_file = "/etc/buzon/master.key"
 
-# URL pública: se usa en los enlaces de invitación.
+# URL pública: se usa en los enlaces de invitación y para volver de Google o Microsoft.
 public_url = "https://correo.ejemplo.es"
 
 # Cookie de sesión solo por HTTPS. Ponlo a false solo en desarrollo.
@@ -25,3 +25,21 @@ allow_insecure_mail = false
 # Webhooks a direcciones de la red local (192.168.x.x, localhost…) o sin HTTPS.
 # Actívalo solo si confías en todos los usuarios: permite llamar a servicios internos.
 allow_private_webhooks = false
+
+# Conectar Gmail y Outlook sin contraseña (OAuth2). Opcional: sin estas secciones,
+# esas cuentas se añaden con una contraseña de aplicación. La dirección de vuelta que hay
+# que registrar en el proveedor es <public_url>/api/v1/oauth/callback.
+#
+# Google Cloud Console → APIs y servicios → Credenciales → ID de cliente OAuth (aplicación web).
+# Permiso: https://mail.google.com/
+# [oauth.google]
+# client_id = "…apps.googleusercontent.com"
+# client_secret = "…"
+#
+# Microsoft Entra → Registros de aplicaciones → Nuevo registro (web). Permisos delegados:
+# IMAP.AccessAsUser.All, SMTP.Send y offline_access. `tenant`: common (personales y de
+# empresa), organizations, consumers o el id de tu organización.
+# [oauth.microsoft]
+# client_id = "…"
+# client_secret = "…"
+# tenant = "common"

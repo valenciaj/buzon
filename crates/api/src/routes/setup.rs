@@ -132,6 +132,7 @@ pub fn new_account(a: &AccountInput) -> NewAccount<'_> {
         smtp_port: a.smtp_port,
         login: a.login.trim(),
         password: &a.password,
+        auth: "password",
         imap_security: &a.imap_security,
         smtp_security: &a.smtp_security,
     }

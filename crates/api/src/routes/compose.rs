@@ -511,16 +511,18 @@ pub(crate) async fn deliver(
     };
     let (message, message_id) = send::build(&outgoing).map_err(|e| ApiError::bad_request(e.to_string()))?;
 
-    let password = udb
-        .account_password(account.id, &st.secrets_for(user))
-        .await?
-        .unwrap_or_default();
+    let creds = st.creds(user, &account).await?;
+    let auth = st
+        .sync
+        .auth(&udb, account.id, &creds)
+        .await
+        .map_err(|e| ApiError::new(StatusCode::BAD_GATEWAY, "smtp_failed", format!("{e}.")))?;
     let cfg = SmtpConfig {
         host: account.smtp_host.clone(),
         port: account.smtp_port,
         security: Security::parse(&account.smtp_security).unwrap_or(Security::Tls),
         login: account.login.clone(),
-        password,
+        auth,
     };
     if let Err(e) = send::send(&cfg, &message).await {
         return Err(ApiError::new(StatusCode::BAD_GATEWAY, "smtp_failed", format!("{e}.")));

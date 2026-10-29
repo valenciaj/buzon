@@ -6,6 +6,7 @@ pub mod flow;
 pub mod invitations;
 pub mod mail;
 pub mod me;
+pub mod oauth;
 pub mod organize;
 pub mod setup;
 pub mod tokens;

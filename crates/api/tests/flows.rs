@@ -1882,3 +1882,287 @@ async fn scheduled_sends_can_be_undone_and_followed_up() {
         .unwrap()
         .is_empty());
 }
+
+/// Servidor de tokens de OAuth2 falso: contesta en orden y devuelve el cuerpo de cada petición.
+async fn fake_token_server(replies: Vec<(u16, Value)>) -> (u16, tokio::sync::mpsc::UnboundedReceiver<String>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        let mut replies = replies.into_iter();
+        loop {
+            let (mut s, _) = listener.accept().await.unwrap();
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 4096];
+            let body = loop {
+                let n = s.read(&mut chunk).await.unwrap();
+                buf.extend_from_slice(&chunk[..n]);
+                let text = String::from_utf8_lossy(&buf).to_string();
+                if let Some((head, body)) = text.split_once("\r\n\r\n") {
+                    let len: usize = head
+                        .lines()
+                        .find_map(|l| {
+                            l.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(|v| v.trim().parse().unwrap())
+                        })
+                        .unwrap_or(0);
+                    if body.len() >= len || n == 0 {
+                        break body.to_string();
+                    }
+                }
+            };
+            let (code, json) = replies.next().unwrap_or((500, json!({})));
+            let json = json.to_string();
+            let _ = s
+                .write_all(
+                    format!(
+                        "HTTP/1.1 {code} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{json}",
+                        json.len()
+                    )
+                    .as_bytes(),
+                )
+                .await;
+            let _ = tx.send(body);
+        }
+    });
+    (port, rx)
+}
+
+fn query_param(url: &str, key: &str) -> String {
+    url.split_once('?')
+        .unwrap()
+        .1
+        .split('&')
+        .find_map(|kv| kv.strip_prefix(&format!("{key}=")))
+        .unwrap()
+        .to_string()
+}
+
+#[tokio::test]
+async fn gmail_accounts_connect_with_oauth2_and_refresh_tokens() {
+    use buzon_sync::oauth::{fake_id_token, pkce_challenge};
+    use buzon_sync::{Auth, OAuthApp, Provider};
+
+    let id_token = fake_id_token("ana@gmail.com");
+    let (port, mut hits) = fake_token_server(vec![
+        (
+            200,
+            json!({"access_token": "at1", "refresh_token": "rt1", "expires_in": 3600, "id_token": id_token}),
+        ),
+        (
+            200,
+            json!({"access_token": "at2", "refresh_token": "rt2", "expires_in": 3600}),
+        ),
+        (
+            200,
+            json!({"access_token": "at3", "refresh_token": "rt3", "id_token": id_token}),
+        ),
+        (400, json!({"error": "invalid_grant"})),
+    ])
+    .await;
+    let dir = tempfile::tempdir().unwrap();
+    let db = AppDb::open(&dir.path().join("app.db")).await.unwrap();
+    let mut state = AppState::new(
+        db,
+        dir.path().to_path_buf(),
+        MasterKey::generate(),
+        true,
+        Some("https://correo.test".into()),
+    );
+    let mut google = OAuthApp::google("cliente".into(), "secreto".into());
+    google.token_url = format!("http://127.0.0.1:{port}/token");
+    state.oauth.insert(Provider::Google, Arc::new(google));
+    let state = Arc::new(state);
+    let t = T {
+        app: buzon_api::app(state.clone(), None),
+        state,
+        dir,
+    };
+    let admin = t.setup().await;
+    let other = t.invite_user(&admin, "lucia").await;
+
+    let p = t.call("GET", "/api/v1/oauth/providers", Some(&admin), None).await;
+    assert_eq!(p.body, json!({"providers": ["google"]}));
+    let r = t
+        .call("POST", "/api/v1/oauth/microsoft/start", Some(&admin), Some(json!({})))
+        .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+
+    let start = |cookie: String| {
+        let t = &t;
+        async move {
+            let r = t
+                .call(
+                    "POST",
+                    "/api/v1/oauth/google/start",
+                    Some(&cookie),
+                    Some(json!({"login_hint": "ana@gmail.com"})),
+                )
+                .await;
+            assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+            r.body["url"].as_str().unwrap().to_string()
+        }
+    };
+    let back = |r: Res| r.headers[header::LOCATION].to_str().unwrap().to_string();
+
+    let url = start(admin.clone()).await;
+    assert!(url.starts_with("https://accounts.google.com/"), "{url}");
+    let (state_param, challenge) = (query_param(&url, "state"), query_param(&url, "code_challenge"));
+
+    // Un `state` desconocido, o de otro usuario, no sirve.
+    let r = t
+        .call("GET", "/api/v1/oauth/callback?code=c&state=nada", Some(&admin), None)
+        .await;
+    assert_eq!(r.status, StatusCode::SEE_OTHER);
+    assert!(back(r).starts_with("/settings/accounts?oauth_error="));
+    let other_url = start(other.clone()).await;
+    let r = t
+        .call(
+            "GET",
+            &format!(
+                "/api/v1/oauth/callback?code=c&state={}",
+                query_param(&other_url, "state")
+            ),
+            Some(&admin),
+            None,
+        )
+        .await;
+    assert!(back(r).contains("oauth_error="));
+    // Sin sesión, a iniciarla.
+    let r = t
+        .call(
+            "GET",
+            &format!("/api/v1/oauth/callback?code=c&state={state_param}"),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(back(r), "/login");
+
+    let r = t
+        .call(
+            "GET",
+            &format!("/api/v1/oauth/callback?code=c0d1go&state={state_param}"),
+            Some(&admin),
+            None,
+        )
+        .await;
+    assert_eq!(back(r), "/settings/accounts?oauth=ok");
+    let body = hits.recv().await.unwrap();
+    assert!(
+        body.contains("grant_type=authorization_code") && body.contains("code=c0d1go"),
+        "{body}"
+    );
+    assert!(body.contains("redirect_uri=https%3A%2F%2Fcorreo.test%2Fapi%2Fv1%2Foauth%2Fcallback"));
+    let verifier = query_param(&format!("?{body}"), "code_verifier");
+    assert_eq!(pkce_challenge(&verifier), challenge);
+
+    // El `state` es de un solo uso.
+    let r = t
+        .call(
+            "GET",
+            &format!("/api/v1/oauth/callback?code=c0d1go&state={state_param}"),
+            Some(&admin),
+            None,
+        )
+        .await;
+    assert!(back(r).contains("oauth_error="));
+
+    let accounts = t.call("GET", "/api/v1/accounts", Some(&admin), None).await.body;
+    let acc = accounts
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["auth"] == "google")
+        .expect("cuenta de Gmail");
+    assert_eq!(
+        (
+            acc["email"].as_str(),
+            acc["login"].as_str(),
+            acc["imap_host"].as_str(),
+            acc["smtp_port"].as_u64()
+        ),
+        (
+            Some("ana@gmail.com"),
+            Some("ana@gmail.com"),
+            Some("imap.gmail.com"),
+            Some(465)
+        )
+    );
+    assert_eq!(accounts[0]["auth"], "password");
+
+    // El token de acceso se renueva con el de renovación, y se guarda el nuevo.
+    let me = t.call("GET", "/api/v1/me", Some(&admin), None).await.body;
+    let user: Id = me["id"].as_str().unwrap().parse().unwrap();
+    let udb = t.state.user_db(user).await.unwrap();
+    let account_id: Id = acc["id"].as_str().unwrap().parse().unwrap();
+    let account = udb.account(account_id).await.unwrap().unwrap();
+    let secrets = t.state.secrets_for(user);
+    assert_eq!(
+        udb.account_password(account_id, &secrets).await.unwrap().as_deref(),
+        Some("rt1")
+    );
+    let creds = t.state.creds(user, &account).await.unwrap();
+    let auth = t.state.sync.auth(&udb, account_id, &creds).await.unwrap();
+    assert!(matches!(auth, Auth::XOAuth2(ref a) if a == "at2"));
+    let body = hits.recv().await.unwrap();
+    assert!(
+        body.contains("grant_type=refresh_token") && body.contains("refresh_token=rt1"),
+        "{body}"
+    );
+    assert!(body.contains("client_secret=secreto"));
+    assert_eq!(
+        udb.account_password(account_id, &secrets).await.unwrap().as_deref(),
+        Some("rt2")
+    );
+    // Mientras no caduque, no se vuelve a pedir.
+    let auth = t.state.sync.auth(&udb, account_id, &creds).await.unwrap();
+    assert!(matches!(auth, Auth::XOAuth2(ref a) if a == "at2"));
+    assert!(hits.try_recv().is_err());
+
+    // Volver a conectar la misma dirección no duplica la cuenta.
+    let url = start(admin.clone()).await;
+    let r = t
+        .call(
+            "GET",
+            &format!("/api/v1/oauth/callback?code=otro&state={}", query_param(&url, "state")),
+            Some(&admin),
+            None,
+        )
+        .await;
+    assert_eq!(back(r), "/settings/accounts?oauth=ok");
+    hits.recv().await.unwrap();
+    let accounts = t.call("GET", "/api/v1/accounts", Some(&admin), None).await.body;
+    assert_eq!(accounts.as_array().unwrap().len(), 2);
+    assert_eq!(
+        udb.account_password(account_id, &secrets).await.unwrap().as_deref(),
+        Some("rt3")
+    );
+
+    // Si se retira el permiso, el error lo dice claro.
+    let err = t
+        .state
+        .sync
+        .auth(&udb, account_id, &creds)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("vuelve a conectar"), "{err}");
+
+    // Los tokens de la API no pueden conectar cuentas.
+    let tok = t
+        .call(
+            "POST",
+            "/api/v1/tokens",
+            Some(&admin),
+            Some(json!({"name": "script", "scopes": ["mail:read", "mail:write", "mail:send"]})),
+        )
+        .await;
+    let tok = tok.body["token"].as_str().unwrap().to_string();
+    let r = t
+        .call("POST", "/api/v1/oauth/google/start", Some(&tok), Some(json!({})))
+        .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.body);
+}

@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use buzon_store::user::user_raw_dir;
 use buzon_store::Id;
-use buzon_sync::{Security, ServerConfig};
+use buzon_sync::{Auth, Security, ServerConfig};
 
 use crate::error::{ApiError, ApiResult, ErrorBody};
 use crate::models::{AccountInput, AccountOut};
@@ -87,7 +87,7 @@ pub async fn create(
             port: req.imap_port,
             security: Security::parse(&req.imap_security).unwrap_or(Security::Tls),
             login: req.login.trim().to_string(),
-            password: req.password.clone(),
+            auth: Auth::Password(req.password.clone()),
         };
         if let Err(e) = buzon_sync::check(&cfg).await {
             return Err(ApiError::new(

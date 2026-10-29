@@ -447,6 +447,7 @@ mod tests {
                     smtp_port: 465,
                     login: "yo",
                     password: "x",
+                    auth: "password",
                     imap_security: "tls",
                     smtp_security: "tls",
                 },

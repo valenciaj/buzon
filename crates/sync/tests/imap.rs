@@ -1,5 +1,5 @@
 //! Prueba de la sincronización completa contra un servidor IMAP de mentira, en memoria.
-//! Implementa solo lo que usa Buzón: LOGIN, LIST, SELECT, UID SEARCH/FETCH/STORE/MOVE e IDLE.
+//! Implementa solo lo que usa Buzón: LOGIN, AUTHENTICATE XOAUTH2, LIST, SELECT, UID SEARCH/FETCH/STORE/MOVE e IDLE.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -9,7 +9,7 @@ use buzon_store::mail::ThreadQuery;
 use buzon_store::organize::{Place, Rule};
 use buzon_store::user::{user_raw_dir, NewAccount};
 use buzon_store::{Id, UserDb};
-use buzon_sync::{HookEvent, Security, ServerConfig, State, SyncHub};
+use buzon_sync::{Auth, Creds, HookEvent, Security, ServerConfig, State, SyncHub};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Notify;
@@ -126,6 +126,22 @@ async fn client(stream: TcpStream, state: Arc<Mutex<Server>>, notify: Arc<Notify
                     format!("* CAPABILITY IMAP4rev1 IDLE MOVE\r\n{ok}")
                 } else {
                     format!("{tag} NO [AUTHENTICATIONFAILED] credenciales no válidas\r\n")
+                }
+            }
+            "AUTHENTICATE" if parts[2].eq_ignore_ascii_case("XOAUTH2") => {
+                use base64::Engine;
+                w.write_all(b"+ \r\n").await.unwrap();
+                let answer = lines.next_line().await.unwrap().unwrap_or_default();
+                let decoded = base64::engine::general_purpose::STANDARD
+                    .decode(answer.trim())
+                    .unwrap_or_default();
+                out = if decoded == buzon_sync::oauth::xoauth2("yo", "tok-bueno").as_bytes() {
+                    ok.clone()
+                } else {
+                    // Como Gmail: un reto con el error, se espera una respuesta vacía y luego NO.
+                    w.write_all(b"+ eyJzdGF0dXMiOiI0MDAifQ==\r\n").await.unwrap();
+                    let _ = lines.next_line().await;
+                    format!("{tag} NO [AUTHENTICATIONFAILED] token no válido\r\n")
                 }
             }
             "LOGOUT" => {
@@ -364,6 +380,7 @@ async fn syncs_threads_flags_and_new_mail_with_idle() {
                 smtp_port: 25,
                 login: "yo",
                 password: "clave",
+                auth: "password",
                 imap_security: "none",
                 smtp_security: "none",
             },
@@ -378,16 +395,22 @@ async fn syncs_threads_flags_and_new_mail_with_idle() {
         port,
         security: Security::None,
         login: "yo".into(),
-        password: "mal".into(),
+        auth: Auth::Password("mal".into()),
     };
     let err = buzon_sync::check(&cfg).await.unwrap_err().to_string();
     assert!(err.contains("contraseña"), "{err}");
-    cfg.password = "clave".into();
+    cfg.auth = Auth::Password("clave".into());
+    buzon_sync::check(&cfg).await.unwrap();
+    // Gmail y Outlook: XOAUTH2 con el token de acceso.
+    cfg.auth = Auth::XOAuth2("tok-malo".into());
+    let err = buzon_sync::check(&cfg).await.unwrap_err().to_string();
+    assert!(err.contains("token no válido"), "{err}");
+    cfg.auth = Auth::XOAuth2("tok-bueno".into());
     buzon_sync::check(&cfg).await.unwrap();
 
     let hub = SyncHub::new(dir.path().to_path_buf(), true);
     let mut hooks = hub.subscribe_hooks();
-    hub.start(user, db.clone(), &account, "clave".into());
+    hub.start(user, db.clone(), &account, Creds::Password("clave".into()));
     wait_for("primera sincronización", || hub.state(account.id) == State::Idle).await;
 
     let inbox = ThreadQuery {

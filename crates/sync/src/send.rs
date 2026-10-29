@@ -5,10 +5,10 @@ use std::time::Duration;
 use buzon_store::mail::Addr;
 use lettre::message::header::ContentType;
 use lettre::message::{Attachment, Mailbox, MultiPart, SinglePart};
-use lettre::transport::smtp::authentication::Credentials;
+use lettre::transport::smtp::authentication::{Credentials, Mechanism};
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 
-use crate::Security;
+use crate::{Auth, Security};
 
 const TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -28,7 +28,7 @@ pub struct SmtpConfig {
     pub port: u16,
     pub security: Security,
     pub login: String,
-    pub password: String,
+    pub auth: Auth,
 }
 
 /// Un adjunto ya leído.
@@ -117,11 +117,13 @@ pub async fn send(cfg: &SmtpConfig, msg: &Message) -> Result<(), SendError> {
         Security::StartTls => AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&cfg.host).map_err(smtp)?,
         Security::None => AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&cfg.host),
     };
-    let transport = builder
-        .port(cfg.port)
-        .credentials(Credentials::new(cfg.login.clone(), cfg.password.clone()))
-        .timeout(Some(TIMEOUT))
-        .build();
+    let builder = match &cfg.auth {
+        Auth::Password(p) => builder.credentials(Credentials::new(cfg.login.clone(), p.clone())),
+        Auth::XOAuth2(token) => builder
+            .credentials(Credentials::new(cfg.login.clone(), token.clone()))
+            .authentication(vec![Mechanism::Xoauth2]),
+    };
+    let transport = builder.port(cfg.port).timeout(Some(TIMEOUT)).build();
     transport.send(msg.clone()).await.map_err(smtp)?;
     Ok(())
 }

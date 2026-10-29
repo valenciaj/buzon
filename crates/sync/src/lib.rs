@@ -5,19 +5,23 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use buzon_store::crypto::SecretBox;
 use buzon_store::mail::ImapTarget;
 use buzon_store::organize::{ExpungeOp, MoveOp};
 use buzon_store::user::{user_raw_dir, Account};
 use buzon_store::{Id, UserDb};
 use serde::Serialize;
 use tokio::sync::{broadcast, mpsc};
+use tokio::time::{Duration, Instant};
 
 pub mod conn;
+pub mod oauth;
 pub mod parse;
 pub mod send;
 mod worker;
 
-pub use conn::{check, Security, ServerConfig};
+pub use conn::{check, Auth, Security, ServerConfig};
+pub use oauth::{OAuthApp, OAuthError, Provider};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -35,6 +39,8 @@ pub enum Error {
     Config(&'static str),
     #[error("{0}")]
     Store(#[from] buzon_store::Error),
+    #[error("{0}")]
+    OAuth(#[from] OAuthError),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -96,13 +102,66 @@ pub(crate) enum Cmd {
     Stop,
 }
 
+/// Con qué se entra en el correo de una cuenta.
+#[derive(Clone)]
+pub enum Creds {
+    Password(String),
+    /// El secreto guardado de la cuenta es el token de renovación de OAuth2.
+    OAuth {
+        app: Arc<OAuthApp>,
+        secrets: Arc<SecretBox>,
+    },
+}
+
 pub(crate) struct Shared {
     pub events: broadcast::Sender<Event>,
     pub hooks: broadcast::Sender<HookEvent>,
     pub status: Mutex<HashMap<Id, State>>,
+    /// Tokens de acceso de OAuth2 en vigor y cuándo caducan.
+    tokens: Mutex<HashMap<Id, (String, Instant)>>,
+    /// Una renovación cada vez, para no pedir dos tokens a la vez.
+    refreshing: tokio::sync::Mutex<()>,
 }
 
 impl Shared {
+    /// Credenciales para conectar ahora: con OAuth2, renueva el token de acceso si caduca pronto.
+    pub async fn auth(&self, db: &UserDb, account: Id, creds: &Creds) -> Result<Auth> {
+        let (app, secrets) = match creds {
+            Creds::Password(p) => return Ok(Auth::Password(p.clone())),
+            Creds::OAuth { app, secrets } => (app, secrets),
+        };
+        let cached = |tokens: &Mutex<HashMap<Id, (String, Instant)>>| {
+            tokens
+                .lock()
+                .expect("mutex")
+                .get(&account)
+                .filter(|(_, until)| *until > Instant::now() + Duration::from_secs(120))
+                .map(|(t, _)| Auth::XOAuth2(t.clone()))
+        };
+        if let Some(a) = cached(&self.tokens) {
+            return Ok(a);
+        }
+        let _guard = self.refreshing.lock().await;
+        if let Some(a) = cached(&self.tokens) {
+            return Ok(a);
+        }
+        let refresh = db
+            .account_password(account, secrets)
+            .await?
+            .ok_or(Error::Config("la cuenta no existe"))?;
+        let t = app.refresh(&refresh).await?;
+        // Microsoft cambia el token de renovación en cada uso: hay que guardar el nuevo.
+        if let Some(new) = t.refresh_token.as_deref().filter(|n| *n != refresh) {
+            db.set_account_secret(account, new, secrets).await?;
+        }
+        let until = Instant::now() + Duration::from_secs(t.expires_in);
+        self.tokens
+            .lock()
+            .expect("mutex")
+            .insert(account, (t.access_token.clone(), until));
+        Ok(Auth::XOAuth2(t.access_token))
+    }
+
     pub fn set_state(&self, user: Id, account: Id, state: State) {
         let prev = self.status.lock().expect("mutex").insert(account, state);
         if prev != Some(state) {
@@ -138,12 +197,19 @@ impl SyncHub {
                 events: broadcast::channel(256).0,
                 hooks: broadcast::channel(1024).0,
                 status: Mutex::new(HashMap::new()),
+                tokens: Mutex::new(HashMap::new()),
+                refreshing: tokio::sync::Mutex::new(()),
             }),
         }
     }
 
+    /// `false` en las pruebas: no se conecta con ningún servidor.
+    pub fn enabled(&self) -> bool {
+        self.enabled
+    }
+
     /// Arranca (o reinicia) la sincronización de una cuenta.
-    pub fn start(&self, user: Id, db: UserDb, account: &Account, password: String) {
+    pub fn start(&self, user: Id, db: UserDb, account: &Account, creds: Creds) {
         if !self.enabled {
             return;
         }
@@ -162,8 +228,9 @@ impl SyncHub {
                 port: account.imap_port,
                 security,
                 login: account.login.clone(),
-                password,
+                auth: Auth::Password(String::new()),
             },
+            creds,
             raw_dir: user_raw_dir(&self.data_dir, user),
             shared: self.shared.clone(),
         };
@@ -176,6 +243,12 @@ impl SyncHub {
             let _ = w.tx.send(Cmd::Stop);
         }
         self.shared.status.lock().expect("mutex").remove(&account);
+        self.shared.tokens.lock().expect("mutex").remove(&account);
+    }
+
+    /// Credenciales para conectar ahora con el servidor (IMAP o SMTP) de la cuenta.
+    pub async fn auth(&self, db: &UserDb, account: Id, creds: &Creds) -> Result<Auth> {
+        self.shared.auth(db, account, creds).await
     }
 
     pub fn sync_now(&self, account: Id) {

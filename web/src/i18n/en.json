@@ -120,7 +120,17 @@
       "idle": "Up to date",
       "error": "Error"
     },
-    "syncedAt": "Last sync: {{date}}"
+    "syncedAt": "Last sync: {{date}}",
+    "oauth": {
+      "title": "Connect without a password",
+      "body": "For Gmail and Outlook: grant access on their page and come back here. Buzón never sees your password, and you can revoke access at any time.",
+      "connect": "Connect with {{provider}}",
+      "google": "Google",
+      "microsoft": "Microsoft",
+      "via": "via {{provider}}",
+      "connected": "Account connected. Buzón is downloading your mail.",
+      "reconnect": "Reconnect"
+    }
   },
   "login": {
     "title": "Sign in to Buzón",

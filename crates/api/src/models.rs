@@ -175,6 +175,8 @@ pub struct AccountOut {
     pub login: String,
     pub imap_security: String,
     pub smtp_security: String,
+    /// Cómo se entra: `password`, o con OAuth2 `google` o `microsoft`.
+    pub auth: String,
     /// Estado de la sincronización: `off`, `connecting`, `syncing`, `idle` o `error`.
     pub state: String,
     /// Última sincronización completa (segundos Unix).
@@ -200,6 +202,7 @@ impl AccountOut {
             login: a.login,
             imap_security: a.imap_security,
             smtp_security: a.smtp_security,
+            auth: a.auth,
             state,
             synced_at: a.synced_at,
             sync_error: a.sync_error,
