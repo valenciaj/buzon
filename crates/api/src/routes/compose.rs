@@ -8,7 +8,7 @@ use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
-use buzon_store::compose::{Draft, Identity};
+use buzon_store::compose::{Draft, Identity, MessageRef};
 use buzon_store::mail::Addr;
 use buzon_store::user::user_raw_dir;
 use buzon_store::{now, Id, UserDb};
@@ -286,6 +286,7 @@ pub async fn create_draft(
 ) -> ApiResult<Json<DraftOut>> {
     let udb = st.user_db(cu.user.id).await?;
     let d = udb.save_draft(&draft_from(req, None)).await?;
+    upload_draft_later(&st, cu.user.id, d.id.expect("guardado"));
     Ok(Json(draft_out(&udb, d).await?))
 }
 
@@ -300,10 +301,20 @@ pub async fn update_draft(
 ) -> ApiResult<Json<DraftOut>> {
     let id = parse_id(&id, "Ese borrador")?;
     let udb = st.user_db(cu.user.id).await?;
-    if udb.draft(id).await?.is_none() {
-        return Err(ApiError::not_found("Ese borrador no existe."));
-    }
+    let old = udb
+        .draft(id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Ese borrador no existe."))?;
     let d = udb.save_draft(&draft_from(req, Some(id))).await?;
+    // Si cambia de cuenta, la copia de la anterior sobra.
+    if st.sync.enabled() {
+        if let Some((account, mailbox)) = drafts_folder(&udb, &old).await {
+            if drafts_folder(&udb, &d).await.map(|(a, _)| a) != Some(account) {
+                st.sync.put_draft(account, &mailbox, &id.to_base58(), None);
+            }
+        }
+    }
+    upload_draft_later(&st, cu.user.id, id);
     Ok(Json(draft_out(&udb, d).await?))
 }
 
@@ -322,6 +333,7 @@ pub async fn delete_draft(
         .draft(id)
         .await?
         .ok_or_else(|| ApiError::not_found("Ese borrador no existe."))?;
+    forget_draft_copy(&st, &udb, id).await;
     remove_uploads(&st, cu.user.id, &udb, &d.attachments).await?;
     udb.delete_draft(id).await?;
     Ok(StatusCode::NO_CONTENT)
@@ -362,6 +374,9 @@ pub async fn send_mail(
             check_message(&udb, &req.message).await?;
             let d = udb.save_draft(&draft_from(req.message, req.draft_id)).await?;
             let id = d.id.expect("guardado");
+            if req.draft_id.is_some() {
+                forget_draft_copy(&st, &udb, id).await;
+            }
             udb.schedule_draft(id, Some(at), req.follow_up_days, None).await?;
             st.sends_ready.notify_one();
             Ok(Json(SendResult {
@@ -430,85 +445,24 @@ pub(crate) async fn deliver(
         .await?
         .ok_or_else(|| ApiError::not_found("Esa cuenta no existe."))?;
 
-    let to: Vec<Addr> = m.to.into_iter().map(Into::into).collect();
-    let cc: Vec<Addr> = m.cc.into_iter().map(Into::into).collect();
-    let bcc: Vec<Addr> = m.bcc.into_iter().map(Into::into).collect();
-    check_recipients(to.iter().chain(&cc).chain(&bcc).map(|a| a.email.as_str()))?;
-
-    // Respuesta: cabeceras para que el destinatario lo vea en el mismo hilo.
-    let replied = match m.reply_to {
-        Some(id) => udb.message_ref(id).await?.map(|r| (id, r)),
-        None => None,
-    };
-    let (in_reply_to, references) = match &replied {
-        Some((_, r)) => {
-            let mut refs = r.refs.clone();
-            refs.extend(r.message_id.clone());
-            (r.message_id.clone(), refs)
-        }
-        None => (None, Vec::new()),
-    };
-
-    // Adjuntos: los subidos y, al reenviar, los del original.
-    let mut attachments = Vec::new();
-    for a in &m.attachments {
-        let up = udb
-            .upload(*a)
-            .await?
-            .ok_or_else(|| ApiError::bad_request("Un adjunto ya no existe. Vuelve a añadirlo."))?;
-        let data = tokio::fs::read(uploads_dir(st, user).join(a.to_base58()))
-            .await
-            .map_err(|_| ApiError::bad_request("Un adjunto ya no existe. Vuelve a añadirlo."))?;
-        attachments.push(OutAttachment {
-            name: up.name,
-            content_type: up.content_type,
-            data,
-        });
-    }
-    if let Some(fwd) = m.forward_of {
-        if let Some((_, list)) = udb.attachments(fwd).await? {
-            let raw = tokio::fs::read(user_raw_dir(&st.data_dir, user).join(format!("{fwd}.eml")))
-                .await
-                .unwrap_or_default();
-            for a in list.into_iter().filter(|a| !a.inline) {
-                if let Some(data) = buzon_sync::parse::attachment(&raw, a.index) {
-                    attachments.push(OutAttachment {
-                        name: a.name,
-                        content_type: a.content_type,
-                        data,
-                    });
-                }
-            }
-        }
-    }
-
-    let html = Some(m.html.trim())
-        .filter(|h| !h.is_empty())
-        .map(|h| buzon_sync::parse::sanitize_html(h, &HashMap::new()).html);
-    let recipients: Vec<Addr> = to.iter().chain(&cc).chain(&bcc).cloned().collect();
+    check_recipients(m.to.iter().chain(&m.cc).chain(&m.bcc).map(|a| a.email.as_str()))?;
+    let attachment_ids = m.attachments.clone();
+    let (outgoing, replied) = outgoing(st, user, &udb, &identity, m, true).await?;
+    let recipients: Vec<Addr> = outgoing
+        .to
+        .iter()
+        .chain(&outgoing.cc)
+        .chain(&outgoing.bcc)
+        .cloned()
+        .collect();
     let hook = serde_json::json!({
         "account": account.id,
         "from": identity.email,
-        "to": to,
-        "cc": cc,
-        "subject": m.subject,
+        "to": outgoing.to,
+        "cc": outgoing.cc,
+        "subject": outgoing.subject,
         "in_reply_to": replied.as_ref().map(|(id, _)| *id),
     });
-    let outgoing = Outgoing {
-        from: Addr {
-            name: Some(identity.name.clone()).filter(|n| !n.is_empty()),
-            email: identity.email.clone(),
-        },
-        to,
-        cc,
-        bcc,
-        subject: m.subject,
-        text: m.text,
-        html,
-        in_reply_to,
-        references,
-        attachments,
-    };
     let (message, message_id) = send::build(&outgoing).map_err(|e| ApiError::bad_request(e.to_string()))?;
 
     let creds = st.creds(user, &account).await?;
@@ -549,6 +503,7 @@ pub(crate) async fn deliver(
         );
     }
     if let Some(d) = draft_id {
+        forget_draft_copy(st, &udb, d).await;
         let _ = udb.delete_draft(d).await;
     }
     if let Some(days) = follow_up_days {
@@ -564,13 +519,184 @@ pub(crate) async fn deliver(
     }
     // A quien escribes pasa a tu libreta.
     let _ = udb.remember_recipients(&recipients).await;
-    let _ = remove_uploads(st, user, &udb, &m.attachments).await;
+    let _ = remove_uploads(st, user, &udb, &attachment_ids).await;
     st.sync.emit(user, account.id);
     let _ = st.db.audit(Some(user), "mail.sent", None).await;
     let mut hook = hook;
     hook["message_id"] = serde_json::json!(message_id);
     st.emit_hook(user, "message.sent", hook).await;
     Ok(message_id)
+}
+
+/// El mensaje MIME de un correo a punto de salir o de un borrador. Con `strict`, falla si
+/// falta un adjunto; si no (borradores), se salta lo que no se pueda incluir.
+async fn outgoing(
+    st: &AppState,
+    user: Id,
+    udb: &UserDb,
+    identity: &Identity,
+    m: DraftIn,
+    strict: bool,
+) -> ApiResult<(Outgoing, Option<(Id, MessageRef)>)> {
+    let addrs = |v: Vec<crate::models::AddrIn>| -> Vec<Addr> {
+        v.into_iter()
+            .map(Into::into)
+            .filter(|a: &Addr| strict || valid_email(&a.email))
+            .collect()
+    };
+    let (to, cc, bcc) = (addrs(m.to), addrs(m.cc), addrs(m.bcc));
+
+    // Respuesta: cabeceras para que el destinatario lo vea en el mismo hilo.
+    let replied = match m.reply_to {
+        Some(id) => udb.message_ref(id).await?.map(|r| (id, r)),
+        None => None,
+    };
+    let (in_reply_to, references) = match &replied {
+        Some((_, r)) => {
+            let mut refs = r.refs.clone();
+            refs.extend(r.message_id.clone());
+            (r.message_id.clone(), refs)
+        }
+        None => (None, Vec::new()),
+    };
+
+    // Adjuntos: los subidos y, al reenviar, los del original.
+    let mut attachments = Vec::new();
+    let missing = || ApiError::bad_request("Un adjunto ya no existe. Vuelve a añadirlo.");
+    for a in &m.attachments {
+        let up = match udb.upload(*a).await? {
+            Some(up) => up,
+            None if strict => return Err(missing()),
+            None => continue,
+        };
+        let data = match tokio::fs::read(uploads_dir(st, user).join(a.to_base58())).await {
+            Ok(d) => d,
+            Err(_) if strict => return Err(missing()),
+            Err(_) => continue,
+        };
+        attachments.push(OutAttachment {
+            name: up.name,
+            content_type: up.content_type,
+            data,
+        });
+    }
+    if let Some(fwd) = m.forward_of {
+        if let Some((_, list)) = udb.attachments(fwd).await? {
+            let raw = tokio::fs::read(user_raw_dir(&st.data_dir, user).join(format!("{fwd}.eml")))
+                .await
+                .unwrap_or_default();
+            for a in list.into_iter().filter(|a| !a.inline) {
+                if let Some(data) = buzon_sync::parse::attachment(&raw, a.index) {
+                    attachments.push(OutAttachment {
+                        name: a.name,
+                        content_type: a.content_type,
+                        data,
+                    });
+                }
+            }
+        }
+    }
+
+    let html = Some(m.html.trim())
+        .filter(|h| !h.is_empty())
+        .map(|h| buzon_sync::parse::sanitize_html(h, &HashMap::new()).html);
+    let o = Outgoing {
+        from: Addr {
+            name: Some(identity.name.clone()).filter(|n| !n.is_empty()),
+            email: identity.email.clone(),
+        },
+        to,
+        cc,
+        bcc,
+        subject: m.subject,
+        text: m.text,
+        html,
+        in_reply_to,
+        references,
+        attachments,
+    };
+    Ok((o, replied))
+}
+
+// ---------- Copia en la carpeta Borradores del servidor ----------
+
+/// Espera antes de subir un borrador: la web lo guarda cada poco mientras escribes.
+const DRAFT_UPLOAD_DELAY: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Apunta una versión nueva del borrador; las subidas anteriores pendientes ya no valen.
+fn next_draft_version(st: &AppState, id: Id) -> u64 {
+    let v = st.draft_seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    st.draft_copies.lock().expect("mutex").insert(id, v);
+    v
+}
+
+fn is_current_draft_version(st: &AppState, id: Id, v: u64) -> bool {
+    st.draft_copies.lock().expect("mutex").get(&id) == Some(&v)
+}
+
+/// Dónde va la copia del borrador: la cuenta de su identidad y su carpeta Borradores.
+async fn drafts_folder(udb: &UserDb, d: &Draft) -> Option<(Id, String)> {
+    let m = draft_in(d.clone());
+    let identity = identity_for(udb, &m).await.ok()?;
+    let mailbox = udb.mailbox_name_by_role(identity.account_id, "drafts").await.ok()??;
+    Some((identity.account_id, mailbox))
+}
+
+/// Sube el borrador a la carpeta Borradores del servidor, para verlo también desde
+/// otros programas. Espera un poco por si sigue cambiando.
+pub(crate) fn upload_draft_later(st: &Arc<AppState>, user: Id, id: Id) {
+    if !st.sync.enabled() {
+        return;
+    }
+    let v = next_draft_version(st, id);
+    let st = st.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(DRAFT_UPLOAD_DELAY).await;
+        if !is_current_draft_version(&st, id, v) {
+            return;
+        }
+        if let Err(e) = upload_draft(&st, user, id, v).await {
+            tracing::info!("borrador {id}: no se pudo subir a Borradores: {}", e.message);
+        }
+        let mut copies = st.draft_copies.lock().expect("mutex");
+        if copies.get(&id) == Some(&v) {
+            copies.remove(&id);
+        }
+    });
+}
+
+async fn upload_draft(st: &AppState, user: Id, id: Id, v: u64) -> ApiResult<()> {
+    let udb = st.user_db(user).await?;
+    // Los programados no son borradores: van a salir solos.
+    let Some(d) = udb.draft(id).await?.filter(|d| d.send_at.is_none()) else {
+        return Ok(());
+    };
+    let Some((account, mailbox)) = drafts_folder(&udb, &d).await else {
+        return Ok(());
+    };
+    let m = draft_in(d);
+    let identity = identity_for(&udb, &m).await?;
+    let (o, _) = outgoing(st, user, &udb, &identity, m, false).await?;
+    let raw = send::build_draft(&o, &id.to_base58()).map_err(|e| ApiError::bad_request(e.to_string()))?;
+    // Si mientras tanto se ha enviado o descartado, ya no se sube.
+    if is_current_draft_version(st, id, v) {
+        st.sync.put_draft(account, &mailbox, &id.to_base58(), Some(raw));
+    }
+    Ok(())
+}
+
+/// Quita la copia del borrador de la carpeta Borradores (al enviarlo, programarlo o descartarlo).
+pub(crate) async fn forget_draft_copy(st: &AppState, udb: &UserDb, id: Id) {
+    if !st.sync.enabled() {
+        return;
+    }
+    next_draft_version(st, id);
+    if let Ok(Some(d)) = udb.draft(id).await {
+        if let Some((account, mailbox)) = drafts_folder(udb, &d).await {
+            st.sync.put_draft(account, &mailbox, &id.to_base58(), None);
+        }
+    }
+    st.draft_copies.lock().expect("mutex").remove(&id);
 }
 
 // ---------- Contactos ----------

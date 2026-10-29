@@ -11,7 +11,7 @@ use utoipa::IntoParams;
 
 use crate::error::{ApiError, ApiResult, ErrorBody};
 use crate::models::{DraftOut, FollowUpOut};
-use crate::routes::compose::draft_out;
+use crate::routes::compose::{draft_out, upload_draft_later};
 use crate::session::CurrentUser;
 use crate::AppState;
 
@@ -48,6 +48,7 @@ pub async fn cancel(
         return Err(gone());
     }
     let d = udb.draft(id).await?.ok_or_else(gone)?;
+    upload_draft_later(&st, cu.user.id, id);
     Ok(Json(draft_out(&udb, d).await?))
 }
 

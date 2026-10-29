@@ -1,5 +1,6 @@
 //! Prueba de la sincronización completa contra un servidor IMAP de mentira, en memoria.
-//! Implementa solo lo que usa Buzón: LOGIN, AUTHENTICATE XOAUTH2, LIST, SELECT, UID SEARCH/FETCH/STORE/MOVE e IDLE.
+//! Implementa solo lo que usa Buzón: LOGIN, AUTHENTICATE XOAUTH2, LIST, SELECT, APPEND, EXPUNGE,
+//! UID SEARCH/FETCH/STORE/MOVE e IDLE.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -10,7 +11,7 @@ use buzon_store::organize::{Place, Rule};
 use buzon_store::user::{user_raw_dir, NewAccount};
 use buzon_store::{Id, UserDb};
 use buzon_sync::{Auth, Creds, HookEvent, Security, ServerConfig, State, SyncHub};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Notify;
 
@@ -149,6 +150,40 @@ async fn client(stream: TcpStream, state: Arc<Mutex<Server>>, notify: Arc<Notify
                 return;
             }
             "NOOP" => out = ok.clone(),
+            "APPEND" => {
+                let len: usize = parts
+                    .last()
+                    .unwrap()
+                    .trim_matches(|c| c == '{' || c == '}')
+                    .parse()
+                    .unwrap();
+                w.write_all(b"+ adelante\r\n").await.unwrap();
+                let mut raw = vec![0; len];
+                lines.get_mut().read_exact(&mut raw).await.unwrap();
+                let _ = lines.next_line().await;
+                let flags: Vec<String> = parts
+                    .iter()
+                    .find(|p| p.starts_with('('))
+                    .map(|p| {
+                        p.trim_matches(|c| c == '(' || c == ')')
+                            .split(' ')
+                            .map(String::from)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let mut s = state.lock().unwrap();
+                let f = s.folder(&parts[2]);
+                f.next_uid += 1;
+                let uid = f.next_uid;
+                f.msgs.push(Msg { uid, flags, raw });
+                out = ok.clone();
+            }
+            "EXPUNGE" => {
+                let mut s = state.lock().unwrap();
+                let f = s.folder(selected.as_deref().unwrap());
+                f.msgs.retain(|m| !m.flags.iter().any(|x| x == "\\Deleted"));
+                out = ok.clone();
+            }
             "LIST" => {
                 let s = state.lock().unwrap();
                 for f in &s.folders {
@@ -175,15 +210,22 @@ async fn client(stream: TcpStream, state: Arc<Mutex<Server>>, notify: Arc<Notify
                 let max = f.msgs.iter().map(|m| m.uid).max().unwrap_or(0);
                 match sub.as_str() {
                     "SEARCH" => {
-                        let ranges = if parts[3].eq_ignore_ascii_case("ALL") {
-                            vec![(0, u32::MAX)]
+                        let (ranges, header) = if parts[3].eq_ignore_ascii_case("ALL") {
+                            (vec![(0, u32::MAX)], None)
+                        } else if parts[3].eq_ignore_ascii_case("HEADER") {
+                            (vec![(0, u32::MAX)], Some(format!("{}: {}", parts[4], parts[5])))
                         } else {
-                            parse_set(&parts[4], max)
+                            (parse_set(&parts[4], max), None)
                         };
                         let uids: Vec<String> = f
                             .msgs
                             .iter()
                             .filter(|m| in_set(m.uid, &ranges))
+                            .filter(|m| {
+                                header
+                                    .as_ref()
+                                    .is_none_or(|h| String::from_utf8_lossy(&m.raw).contains(h.as_str()))
+                            })
                             .map(|m| m.uid.to_string())
                             .collect();
                         out = format!("* SEARCH {}\r\n{ok}", uids.join(" "));
@@ -599,4 +641,109 @@ async fn syncs_threads_flags_and_new_mail_with_idle() {
 
     hub.stop(account.id);
     assert_eq!(hub.state(account.id), State::Off);
+}
+
+#[tokio::test]
+async fn keeps_drafts_in_the_servers_drafts_folder() {
+    let fake = fake_server().await;
+    fake.state.lock().unwrap().folders.push(Folder {
+        name: "Borradores",
+        attrs: "\\HasNoChildren \\Drafts",
+        validity: 2,
+        next_uid: 0,
+        msgs: vec![],
+    });
+    // Un borrador escrito en otro programa sí se ve en Buzón.
+    fake.state.lock().unwrap().append(
+        "Borradores",
+        "From: Yo <yo@ejemplo.es>\nSubject: Desde el móvil\nMessage-ID: <m1@ejemplo.es>\n\nA medias\n",
+        &["\\Draft"],
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let user = Id::new();
+    let db = UserDb::open(dir.path(), user).await.unwrap();
+    let key = MasterKey::generate().derive("u");
+    let account = db
+        .add_account(
+            NewAccount {
+                name: "Personal",
+                email: "yo@ejemplo.es",
+                imap_host: "127.0.0.1",
+                imap_port: fake.port,
+                smtp_host: "127.0.0.1",
+                smtp_port: 25,
+                login: "yo",
+                password: "clave",
+                auth: "password",
+                imap_security: "none",
+                smtp_security: "none",
+            },
+            &key,
+        )
+        .await
+        .unwrap();
+    let hub = SyncHub::new(dir.path().to_path_buf(), true);
+    hub.start(user, db.clone(), &account, Creds::Password("clave".into()));
+    wait_for("primera sincronización", || hub.state(account.id) == State::Idle).await;
+
+    let draft = |text: &str| {
+        let o = buzon_sync::send::Outgoing {
+            from: buzon_store::mail::Addr {
+                name: None,
+                email: "yo@ejemplo.es".into(),
+            },
+            to: vec![],
+            cc: vec![],
+            bcc: vec![],
+            subject: "Propuesta".into(),
+            text: text.into(),
+            html: None,
+            in_reply_to: None,
+            references: vec![],
+            attachments: vec![],
+        };
+        buzon_sync::send::build_draft(&o, "d1").unwrap()
+    };
+    let st = fake.state.clone();
+    let bodies = move || -> Vec<(String, Vec<String>)> {
+        st.lock()
+            .unwrap()
+            .folder("Borradores")
+            .msgs
+            .iter()
+            .map(|m| (String::from_utf8_lossy(&m.raw).into_owned(), m.flags.clone()))
+            .collect()
+    };
+
+    // Cada versión sustituye a la anterior; la del otro programa se queda.
+    hub.put_draft(account.id, "Borradores", "d1", Some(draft("primera")));
+    hub.put_draft(account.id, "Borradores", "d1", Some(draft("segunda")));
+    let b = bodies.clone();
+    wait_for("una sola copia, la última", move || {
+        let v = b();
+        v.len() == 2 && v[1].0.contains("segunda")
+    })
+    .await;
+    let v = bodies();
+    assert!(v[1].1.contains(&"\\Draft".to_string()) && v[1].1.contains(&"\\Seen".to_string()));
+
+    // La copia propia no se descarga como mensaje (ya está en la lista de borradores).
+    hub.sync_now(account.id);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    wait_for("sincronizado", || hub.state(account.id) == State::Idle).await;
+    let drafts = ThreadQuery {
+        role: Some("drafts".into()),
+        limit: 10,
+        ..Default::default()
+    };
+    let threads = db.threads(&drafts).await.unwrap();
+    assert_eq!(threads.len(), 1, "{threads:?}");
+    assert_eq!(threads[0].subject, "Desde el móvil");
+
+    // Al enviarlo o descartarlo, la copia desaparece.
+    hub.put_draft(account.id, "Borradores", "d1", None);
+    let b = bodies.clone();
+    wait_for("copia borrada", move || b().len() == 1).await;
+    assert!(bodies()[0].0.contains("Desde el móvil"));
+    hub.stop(account.id);
 }

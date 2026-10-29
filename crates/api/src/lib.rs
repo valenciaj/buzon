@@ -55,6 +55,9 @@ pub struct AppState {
     pub(crate) oauth_pending: Mutex<HashMap<String, routes::oauth::Pending>>,
     /// Correo nuevo, para las notificaciones del navegador: (usuario, datos).
     pub notices: tokio::sync::broadcast::Sender<(Id, serde_json::Value)>,
+    /// Subidas pendientes de borradores a la carpeta Borradores: la última versión pedida de cada uno.
+    pub(crate) draft_copies: Mutex<HashMap<Id, u64>>,
+    pub(crate) draft_seq: std::sync::atomic::AtomicU64,
     user_dbs: Mutex<HashMap<Id, UserDb>>,
     opening: tokio::sync::Mutex<()>,
     /// Peticiones de cada token en el minuto en curso.
@@ -83,6 +86,8 @@ impl AppState {
             notices: tokio::sync::broadcast::channel(256).0,
             oauth: HashMap::new(),
             oauth_pending: Mutex::new(HashMap::new()),
+            draft_copies: Mutex::new(HashMap::new()),
+            draft_seq: std::sync::atomic::AtomicU64::new(0),
             user_dbs: Mutex::new(HashMap::new()),
             opening: tokio::sync::Mutex::new(()),
             rate: Mutex::new(HashMap::new()),

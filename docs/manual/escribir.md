@@ -10,7 +10,7 @@ Pulsa **Redactar** (o <kbd>c</kbd>). Se abre una ventana con:
 
 ![Redactar un correo](/img/es/redactar.png)
 
-Mientras escribes, Buzón guarda el **borrador** solo. Si cierras la ventana, lo encontrarás en **Borradores**.
+Mientras escribes, Buzón guarda el **borrador** solo. Si cierras la ventana, lo encontrarás en **Borradores**. También se guarda una copia en la carpeta Borradores de tu servidor de correo (a los pocos segundos de dejar de escribir), así que puedes seguir con él desde el móvil u otro programa.
 
 ## Adjuntos
 
