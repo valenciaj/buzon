@@ -7,6 +7,7 @@ import { useToast } from '../Toaster'
 import { Alert } from '../ui'
 import { useCompose } from '../compose/ComposerProvider'
 import { Icon } from './Icons'
+import { useThreadPages } from './ThreadList'
 
 function Header({ title, intro, onMenu }: { title: string; intro?: string; onMenu: () => void }) {
   const { t } = useTranslation()
@@ -53,11 +54,9 @@ function Today({ me, account, onMenu, onBox, onOpen }: {
   const mailboxes = useQuery({ queryKey: ['mailboxes'], queryFn: () => api.mailboxes() })
   const due = useQuery({ queryKey: ['followups', 'due'], queryFn: () => api.followups(true) })
   const scheduled = useQuery({ queryKey: ['scheduled'], queryFn: api.scheduled })
-  const later = useQuery({
-    queryKey: ['threads', { view: 'reply_later', account }],
-    queryFn: () => api.threads({ view: 'reply_later', account }),
-    enabled: focus,
-  })
+  // La misma consulta (infinita) que la lista de «Responder más tarde»: comparten la caché.
+  const later = useThreadPages({ view: 'reply_later', account }, focus)
+  const laterThreads = later.data?.pages[0]?.threads ?? []
   const c = flow.data
   const inboxUnread = (mailboxes.data ?? [])
     .filter((m) => m.role === 'inbox' && (!account || m.account_id === account))
@@ -116,11 +115,11 @@ function Today({ me, account, onMenu, onBox, onOpen }: {
             </ul>
           </section>
         )}
-        {focus && (later.data?.threads.length ?? 0) > 0 && (
+        {focus && laterThreads.length > 0 && (
           <section className="flex flex-col gap-1">
             <h2 className="eyebrow">{t('flow.views.reply_later')}</h2>
             <ul className="flex flex-col">
-              {later.data!.threads.slice(0, 5).map((x) => (
+              {laterThreads.slice(0, 5).map((x) => (
                 <li key={x.id}>
                   <button className="flex w-full flex-col rounded-lg px-2 py-2 text-left hover:bg-surface-2" onClick={() => onOpen(x.id)}>
                     <span className="truncate font-semibold">{x.subject || t('mail.noSubject')}</span>
