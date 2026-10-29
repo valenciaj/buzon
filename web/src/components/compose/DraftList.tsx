@@ -26,7 +26,9 @@ export function DraftList({ drafts }: { drafts: Draft[] }) {
                 {to.length > 0 && <span className="font-normal"> · {to.join(', ')}</span>}
               </span>
               <span className="truncate">{d.subject || t('mail.noSubject')}</span>
-              <span className="line-clamp-2 text-sm text-muted">{d.text.trim().split('\n')[0] || '…'}</span>
+              {d.send_error
+                ? <span className="line-clamp-2 text-sm text-crit">{t('compose.sendFailed', { error: d.send_error })}</span>
+                : <span className="line-clamp-2 text-sm text-muted">{d.text.trim().split('\n')[0] || '…'}</span>}
             </span>
             <span className="flex flex-col items-end gap-1 text-sm text-muted tabular-nums">
               <span className="whitespace-nowrap">{shortDate(d.updated_at, i18n.language)}</span>

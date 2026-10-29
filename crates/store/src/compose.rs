@@ -31,6 +31,12 @@ pub struct Draft {
     pub forward_of: Option<Id>,
     pub attachments: Vec<Id>,
     pub updated_at: i64,
+    /// Cuándo sale, si está programado. `save_draft` no lo cambia: usa `schedule_draft`.
+    pub send_at: Option<i64>,
+    /// Por qué falló el último envío programado.
+    pub send_error: Option<String>,
+    /// Avisar si nadie responde en estos días.
+    pub follow_up_days: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,6 +94,9 @@ fn draft_from_row(r: &sqlx::sqlite::SqliteRow) -> Result<Draft> {
         forward_of: opt_id(r, "forward_of")?,
         attachments: serde_json::from_str(&json("attachments")?).unwrap_or_default(),
         updated_at: r.try_get("updated_at")?,
+        send_at: r.try_get("send_at")?,
+        send_error: r.try_get("send_error")?,
+        follow_up_days: r.try_get("follow_up_days")?,
     })
 }
 
@@ -226,11 +235,65 @@ impl UserDb {
         })
     }
 
+    /// Borradores (sin los programados).
     pub async fn drafts(&self) -> Result<Vec<Draft>> {
-        let rows = sqlx::query("SELECT * FROM drafts ORDER BY updated_at DESC, id DESC")
+        let rows = sqlx::query("SELECT * FROM drafts WHERE send_at IS NULL ORDER BY updated_at DESC, id DESC")
             .fetch_all(&self.pool)
             .await?;
         rows.iter().map(draft_from_row).collect()
+    }
+
+    /// Envíos programados, del más próximo al más lejano.
+    pub async fn scheduled(&self) -> Result<Vec<Draft>> {
+        let rows = sqlx::query("SELECT * FROM drafts WHERE send_at IS NOT NULL ORDER BY send_at, id")
+            .fetch_all(&self.pool)
+            .await?;
+        rows.iter().map(draft_from_row).collect()
+    }
+
+    /// Programa un borrador (o lo devuelve a Borradores con `None`, y con el error si falló).
+    pub async fn schedule_draft(
+        &self,
+        id: Id,
+        send_at: Option<i64>,
+        follow_up_days: Option<i64>,
+        error: Option<&str>,
+    ) -> Result<bool> {
+        let r = sqlx::query("UPDATE drafts SET send_at = ?, follow_up_days = ?, send_error = ? WHERE id = ?")
+            .bind(send_at)
+            .bind(follow_up_days)
+            .bind(error)
+            .bind(b(id))
+            .execute(&self.pool)
+            .await?;
+        Ok(r.rows_affected() > 0)
+    }
+
+    /// Cancela un envío programado que aún no ha empezado a salir.
+    pub async fn unschedule_draft(&self, id: Id) -> Result<bool> {
+        let r = sqlx::query("UPDATE drafts SET send_at = NULL, send_error = NULL WHERE id = ? AND send_at > 0")
+            .bind(b(id))
+            .execute(&self.pool)
+            .await?;
+        Ok(r.rows_affected() > 0)
+    }
+
+    /// Envíos que ya tocan. Los marca como en curso (los saca de la cola) para no enviarlos dos veces.
+    pub async fn take_due_drafts(&self, now: i64) -> Result<Vec<Draft>> {
+        let rows = sqlx::query(
+            "UPDATE drafts SET send_at = -send_at WHERE send_at IS NOT NULL AND send_at > 0 AND send_at <= ? RETURNING *",
+        )
+        .bind(now)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(draft_from_row).collect()
+    }
+
+    /// Cuándo sale el próximo envío programado.
+    pub async fn next_send_at(&self) -> Result<Option<i64>> {
+        Ok(sqlx::query_scalar("SELECT MIN(send_at) FROM drafts WHERE send_at > 0")
+            .fetch_one(&self.pool)
+            .await?)
     }
 
     pub async fn draft(&self, id: Id) -> Result<Option<Draft>> {

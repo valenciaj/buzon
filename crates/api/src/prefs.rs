@@ -30,13 +30,19 @@ pub async fn save(db: &UserDb, update: &PreferencesUpdate) -> ApiResult<()> {
             ));
         }
     }
-    let pairs: [(&str, Option<Value>); 6] = [
+    if update.undo_send.is_some_and(|s| ![0, 5, 10, 20, 30].contains(&s)) {
+        return Err(ApiError::bad_request(
+            "El margen para deshacer es de 0, 5, 10, 20 o 30 segundos.",
+        ));
+    }
+    let pairs: [(&str, Option<Value>); 7] = [
         ("theme", update.theme.map(|v| serde_json::json!(v))),
         ("mode", update.mode.map(|v| serde_json::json!(v))),
         ("view", update.view.map(|v| serde_json::json!(v))),
         ("font", update.font.map(|v| serde_json::json!(v))),
         ("font_size", update.font_size.map(|v| serde_json::json!(v))),
         ("density", update.density.map(|v| serde_json::json!(v))),
+        ("undo_send", update.undo_send.map(|v| serde_json::json!(v))),
     ];
     for (k, v) in pairs {
         if let Some(v) = v {

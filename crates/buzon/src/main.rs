@@ -82,7 +82,7 @@ async fn main() -> anyhow::Result<()> {
     state.allow_insecure_mail = cfg.allow_insecure_mail;
     state.allow_private_webhooks = cfg.allow_private_webhooks;
     let state = Arc::new(state);
-    buzon_api::hooks::start(state.clone());
+    buzon_api::start_background(state.clone());
     match state.start_all_accounts().await {
         Ok(n) => tracing::info!("sincronizando {n} cuentas de correo"),
         Err(e) => tracing::error!("no se pudo arrancar la sincronización: {}", e.message),

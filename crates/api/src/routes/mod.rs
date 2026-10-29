@@ -1,6 +1,7 @@
 pub mod accounts;
 pub mod auth;
 pub mod compose;
+pub mod extras;
 pub mod flow;
 pub mod invitations;
 pub mod mail;

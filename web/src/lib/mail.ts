@@ -9,7 +9,11 @@ export const ACCOUNT_COLORS = ['#2f9a72', '#c4683a', '#7a3fa0', '#3d7fb5', '#a88
  * Lo que se está viendo: un tipo de carpeta (en una cuenta o en todas), una carpeta
  * concreta o una etiqueta.
  */
-export type Box = { role: Role } | { mailbox: string } | { label: string } | { view: View }
+export type Box = { role: Role } | { mailbox: string } | { label: string } | { view: View } | { page: Page }
+
+/** Páginas que no son listas de hilos. */
+export type Page = 'today' | 'scheduled' | 'followups'
+export const PAGES: Page[] = ['today', 'scheduled', 'followups']
 
 export const VIEWS: View[] = ['principal', 'news', 'receipts', 'screener', 'blocked', 'reply_later', 'aside', 'snoozed', 'bubbled']
 
@@ -17,11 +21,13 @@ export function parseBox(s: string | null): Box {
   if (s?.startsWith('m:')) return { mailbox: s.slice(2) }
   if (s?.startsWith('l:')) return { label: s.slice(2) }
   if (s?.startsWith('v:') && (VIEWS as string[]).includes(s.slice(2))) return { view: s.slice(2) as View }
+  if (s?.startsWith('p:') && (PAGES as string[]).includes(s.slice(2))) return { page: s.slice(2) as Page }
   if (s && (ROLE_ORDER as string[]).includes(s)) return { role: s as Role }
   return { role: 'inbox' }
 }
 
 export function boxKey(b: Box): string {
+  if ('page' in b) return `p:${b.page}`
   return 'role' in b ? b.role : 'mailbox' in b ? `m:${b.mailbox}` : 'label' in b ? `l:${b.label}` : `v:${b.view}`
 }
 

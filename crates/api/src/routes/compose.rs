@@ -11,7 +11,7 @@ use axum::Json;
 use buzon_store::compose::{Draft, Identity};
 use buzon_store::mail::Addr;
 use buzon_store::user::user_raw_dir;
-use buzon_store::{Id, UserDb};
+use buzon_store::{now, Id, UserDb};
 use buzon_sync::send::{self, OutAttachment, Outgoing, SmtpConfig};
 use buzon_sync::Security;
 use serde::Deserialize;
@@ -220,11 +220,27 @@ fn draft_from(req: DraftIn, id: Option<Id>) -> Draft {
         reply_to: req.reply_to,
         forward_of: req.forward_of,
         attachments: req.attachments,
-        updated_at: 0,
+        ..Default::default()
     }
 }
 
-async fn draft_out(udb: &UserDb, d: Draft) -> ApiResult<DraftOut> {
+/// Un borrador guardado, como si llegara por la API (para enviarlo).
+pub(crate) fn draft_in(d: Draft) -> DraftIn {
+    DraftIn {
+        identity_id: d.identity_id,
+        to: d.to.into_iter().map(Into::into).collect(),
+        cc: d.cc.into_iter().map(Into::into).collect(),
+        bcc: d.bcc.into_iter().map(Into::into).collect(),
+        subject: d.subject,
+        html: d.html,
+        text: d.text,
+        reply_to: d.reply_to,
+        forward_of: d.forward_of,
+        attachments: d.attachments,
+    }
+}
+
+pub(crate) async fn draft_out(udb: &UserDb, d: Draft) -> ApiResult<DraftOut> {
     let mut attachments = Vec::new();
     for a in &d.attachments {
         if let Some(u) = udb.upload(*a).await? {
@@ -244,6 +260,9 @@ async fn draft_out(udb: &UserDb, d: Draft) -> ApiResult<DraftOut> {
         forward_of: d.forward_of,
         attachments,
         updated_at: d.updated_at,
+        send_at: d.send_at,
+        send_error: d.send_error,
+        follow_up_days: d.follow_up_days,
     })
 }
 
@@ -329,14 +348,83 @@ pub async fn send_mail(
     Json(req): Json<SendRequest>,
 ) -> ApiResult<Json<SendResult>> {
     let user = cu.user.id;
-    let udb = st.user_db(user).await?;
-    let m = req.message;
+    if req.follow_up_days.is_some_and(|d| !(1..=30).contains(&d)) {
+        return Err(ApiError::bad_request(
+            "El aviso de seguimiento debe ser de 1 a 30 días.",
+        ));
+    }
+    match req.send_at {
+        Some(at) if at > now() => {
+            if at > now() + MAX_SCHEDULE {
+                return Err(ApiError::bad_request("Solo se puede programar hasta un año vista."));
+            }
+            let udb = st.user_db(user).await?;
+            check_message(&udb, &req.message).await?;
+            let d = udb.save_draft(&draft_from(req.message, req.draft_id)).await?;
+            let id = d.id.expect("guardado");
+            udb.schedule_draft(id, Some(at), req.follow_up_days, None).await?;
+            st.sends_ready.notify_one();
+            Ok(Json(SendResult {
+                message_id: None,
+                scheduled_id: Some(id),
+                send_at: Some(at),
+            }))
+        }
+        _ => {
+            let message_id = deliver(&st, user, req.message, req.draft_id, req.follow_up_days).await?;
+            Ok(Json(SendResult {
+                message_id: Some(message_id),
+                scheduled_id: None,
+                send_at: None,
+            }))
+        }
+    }
+}
 
-    let identity = match m.identity_id {
+/// Lo más lejos que se puede programar un envío.
+const MAX_SCHEDULE: i64 = 366 * 24 * 3600;
+
+async fn identity_for(udb: &UserDb, m: &DraftIn) -> ApiResult<Identity> {
+    match m.identity_id {
         Some(id) => udb.identity(id).await?,
         None => udb.identities(None).await?.into_iter().find(|i| i.is_default),
     }
-    .ok_or_else(|| ApiError::bad_request("Elige desde qué dirección envías."))?;
+    .ok_or_else(|| ApiError::bad_request("Elige desde qué dirección envías."))
+}
+
+fn check_recipients<'a>(all: impl Iterator<Item = &'a str>) -> ApiResult<()> {
+    let mut any = false;
+    for email in all {
+        any = true;
+        if !valid_email(email) {
+            return Err(ApiError::bad_request(format!(
+                "La dirección «{}» no es válida.",
+                email.trim()
+            )));
+        }
+    }
+    if !any {
+        return Err(ApiError::bad_request("Añade al menos un destinatario."));
+    }
+    Ok(())
+}
+
+/// Lo que se comprueba antes de programar un envío (lo demás, al enviarlo).
+async fn check_message(udb: &UserDb, m: &DraftIn) -> ApiResult<()> {
+    identity_for(udb, m).await?;
+    check_recipients(m.to.iter().chain(&m.cc).chain(&m.bcc).map(|a| a.email.as_str()))
+}
+
+/// Envía ya un correo. Lo usan `POST /send` y los envíos programados.
+pub(crate) async fn deliver(
+    st: &AppState,
+    user: Id,
+    m: DraftIn,
+    draft_id: Option<Id>,
+    follow_up_days: Option<i64>,
+) -> ApiResult<String> {
+    let udb = st.user_db(user).await?;
+    let identity = identity_for(&udb, &m).await?;
     let account = udb
         .account(identity.account_id)
         .await?
@@ -345,15 +433,7 @@ pub async fn send_mail(
     let to: Vec<Addr> = m.to.into_iter().map(Into::into).collect();
     let cc: Vec<Addr> = m.cc.into_iter().map(Into::into).collect();
     let bcc: Vec<Addr> = m.bcc.into_iter().map(Into::into).collect();
-    if to.is_empty() && cc.is_empty() && bcc.is_empty() {
-        return Err(ApiError::bad_request("Añade al menos un destinatario."));
-    }
-    if let Some(bad) = to.iter().chain(&cc).chain(&bcc).find(|a| !valid_email(&a.email)) {
-        return Err(ApiError::bad_request(format!(
-            "La dirección «{}» no es válida.",
-            bad.email
-        )));
-    }
+    check_recipients(to.iter().chain(&cc).chain(&bcc).map(|a| a.email.as_str()))?;
 
     // Respuesta: cabeceras para que el destinatario lo vea en el mismo hilo.
     let replied = match m.reply_to {
@@ -376,7 +456,7 @@ pub async fn send_mail(
             .upload(*a)
             .await?
             .ok_or_else(|| ApiError::bad_request("Un adjunto ya no existe. Vuelve a añadirlo."))?;
-        let data = tokio::fs::read(uploads_dir(&st, user).join(a.to_base58()))
+        let data = tokio::fs::read(uploads_dir(st, user).join(a.to_base58()))
             .await
             .map_err(|_| ApiError::bad_request("Un adjunto ya no existe. Vuelve a añadirlo."))?;
         attachments.push(OutAttachment {
@@ -466,18 +546,29 @@ pub async fn send_mail(
             true,
         );
     }
-    if let Some(d) = req.draft_id {
+    if let Some(d) = draft_id {
         let _ = udb.delete_draft(d).await;
+    }
+    if let Some(days) = follow_up_days {
+        let who: Vec<Addr> = hook["to"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .chain(hook["cc"].as_array().into_iter().flatten())
+            .filter_map(|a| serde_json::from_value(a.clone()).ok())
+            .collect();
+        let subject = hook["subject"].as_str().unwrap_or_default().to_string();
+        let _ = udb.add_followup(account.id, &message_id, &subject, &who, days).await;
     }
     // A quien escribes pasa a tu libreta.
     let _ = udb.remember_recipients(&recipients).await;
-    let _ = remove_uploads(&st, user, &udb, &m.attachments).await;
+    let _ = remove_uploads(st, user, &udb, &m.attachments).await;
     st.sync.emit(user, account.id);
     let _ = st.db.audit(Some(user), "mail.sent", None).await;
     let mut hook = hook;
     hook["message_id"] = serde_json::json!(message_id);
     st.emit_hook(user, "message.sent", hook).await;
-    Ok(Json(SendResult { message_id }))
+    Ok(message_id)
 }
 
 // ---------- Contactos ----------

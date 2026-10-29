@@ -12,6 +12,7 @@ import { TotpPanel } from '../components/TotpPanel'
 import { AccountForm, EMPTY_ACCOUNT } from '../components/AccountForm'
 import { LabelsAndRules } from '../components/LabelsAndRules'
 import { ApiPanel } from '../components/ApiPanel'
+import { MailPrefs } from '../components/MailPrefs'
 
 const TABS = ['look', 'security', 'accounts', 'identities', 'labels', 'api', 'invitations'] as const
 type Tab = (typeof TABS)[number]
@@ -78,6 +79,7 @@ function LookTab({ me }: { me: Me }) {
       <Segmented label={t('fields.language')} value={me.language} onChange={(language) => save({ language })}
         options={(['es', 'en'] as const).map((l) => ({ value: l, label: t(`languages.${l}`) }))} />
       <LookPicker value={me.preferences} onChange={save} />
+      <MailPrefs value={me.preferences} onChange={save} />
     </section>
   )
 }

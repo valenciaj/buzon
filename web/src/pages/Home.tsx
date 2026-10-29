@@ -6,12 +6,14 @@ import { api, type FlowChange, type From, type Me, type Role, type ThreadFilter,
 import { actionsFor, boxKey, parseBox, snoozeOptions, type Box, type MailAction } from '../lib/mail'
 import { useLiveUpdates } from '../lib/live'
 import { useSetMe } from '../lib/session'
-import { Sidebar } from '../components/mail/Sidebar'
+import { Sidebar, VIEW_ICONS } from '../components/mail/Sidebar'
+import { CommandPalette, type Command } from '../components/mail/CommandPalette'
 import { ThreadList, useThreadPages } from '../components/mail/ThreadList'
 import { Reader, REPLY_EVENT, type ReplyKind } from '../components/mail/Reader'
 import { Icon } from '../components/mail/Icons'
 import { LabelMenu, MoveMenu, SnoozeMenu } from '../components/mail/Menus'
 import { Screener } from '../components/mail/Screener'
+import { PageView } from '../components/mail/Pages'
 import { useMailActions, type MoveTarget } from '../components/mail/useMailActions'
 import { Shortcuts } from '../components/mail/Shortcuts'
 import { DraftList } from '../components/compose/DraftList'
@@ -57,7 +59,8 @@ function Mail({ me }: { me: Me }) {
   const [params, setParams] = useSearchParams()
   const [drawer, setDrawer] = useState(false)
   const [help, setHelp] = useState(false)
-  useLiveUpdates()
+  const [palette, setPalette] = useState(false)
+  useLiveUpdates(me)
 
   const accounts = useQuery({ queryKey: ['accounts'], queryFn: api.accounts })
   const mailboxes = useQuery({ queryKey: ['mailboxes'], queryFn: () => api.mailboxes() })
@@ -76,14 +79,16 @@ function Mail({ me }: { me: Me }) {
     ? { q: search, account }
     : 'role' in box ? { role: box.role, account }
       : 'mailbox' in box ? { mailbox: box.mailbox }
-        : 'label' in box ? { label: box.label, account } : { view: box.view, account }
+        : 'label' in box ? { label: box.label, account }
+          : 'view' in box ? { view: box.view, account } : { view: 'principal', account }
+  const page = 'page' in box && !search ? box.page : undefined
   const home: Box = focus ? { view: 'principal' } : { role: 'inbox' }
 
   const folder = 'mailbox' in box ? boxes.find((m) => m.id === box.mailbox) : undefined
   const label = 'label' in box ? labels.data?.find((l) => l.id === box.label) : undefined
   const title = search
     ? t('search.title', { q: search })
-    : folder?.name ?? label?.name ?? ('role' in box ? t(`mail.roles.${box.role}`)
+    : folder?.name ?? label?.name ?? ('role' in box ? t(`mail.roles.${box.role}`) : 'page' in box ? t(`pages.${box.page}`)
       : view ? t(`flow.views.${view}`) : t('mail.roles.inbox'))
 
   // Desde dónde se mueve: la carpeta que se ve. En una etiqueta, una pila o una búsqueda, de donde estén.
@@ -102,7 +107,7 @@ function Mail({ me }: { me: Me }) {
   const check = (ids: string[], on: boolean) =>
     setChecked((c) => (on ? new Set([...c, ...ids]) : new Set([...c].filter((x) => !ids.includes(x)))))
 
-  const pages = useThreadPages(filter)
+  const pages = useThreadPages(filter, !page)
   const visible = (pages.data?.pages.flatMap((p) => p.threads) ?? []).filter((x) => !mail.hidden.has(x.id))
 
   function go(change: { a?: string | null; b?: Box; t?: string | null; q?: string }) {
@@ -280,6 +285,7 @@ function Mail({ me }: { me: Me }) {
         setHelp(!help)
         break
       case 'gi': go({ b: home }); break
+      case 'gt': go({ b: { page: 'today' } }); break
       case 'gs': go({ b: { role: 'sent' } }); break
       case 'gd': go({ b: { role: 'drafts' } }); break
       case 'ga': go({ b: { role: 'archive' } }); break
@@ -288,6 +294,73 @@ function Mail({ me }: { me: Me }) {
 
   const keyRef = useRef(key)
   keyRef.current = key
+
+  // Ctrl+K (⌘K en Mac) abre la paleta de órdenes, también desde un campo de texto.
+  useEffect(() => {
+    const on = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setPalette((p) => !p)
+      }
+    }
+    window.addEventListener('keydown', on)
+    return () => window.removeEventListener('keydown', on)
+  }, [])
+
+  async function setPref(change: Partial<Me['preferences']>) {
+    setMe({ ...me, preferences: { ...me.preferences, ...change } })
+    setMe(await api.updatePreferences(change).catch(() => me))
+  }
+
+  const commands = (): Command[] => {
+    const goTo = t('palette.groups.go')
+    const act = t('palette.groups.actions')
+    const prefs = t('palette.groups.settings')
+    const nav = (id: string, label: string, icon: string, b: Box, hint?: string): Command =>
+      ({ id, label, icon, group: goTo, hint, run: () => go({ b }) })
+    const out: Command[] = [nav('p:today', t('pages.today'), 'sun', { page: 'today' }, 'g t')]
+    if (focus) {
+      for (const v of ['principal', 'news', 'receipts', 'screener', 'reply_later', 'aside', 'snoozed', 'blocked'] as View[]) {
+        out.push(nav(`v:${v}`, t(`flow.views.${v}`), VIEW_ICONS[v], { view: v }))
+      }
+    }
+    for (const r of ['inbox', 'sent', 'drafts', 'archive', 'junk', 'trash'] as Role[]) {
+      out.push(nav(r, t(`mail.roles.${r}`), r, { role: r }, ({ inbox: 'g i', sent: 'g s', drafts: 'g d', archive: 'g a' } as Record<string, string>)[r]))
+    }
+    out.push(nav('p:scheduled', t('pages.scheduled'), 'clock', { page: 'scheduled' }))
+    out.push(nav('p:followups', t('pages.followups'), 'bell', { page: 'followups' }))
+    for (const l of labels.data ?? []) out.push({ ...nav(`l:${l.id}`, l.name, 'tag', { label: l.id }), keywords: t('labels.title') })
+    for (const f of boxes.filter((m) => !m.role)) out.push({ ...nav(`m:${f.id}`, f.name, 'folder', { mailbox: f.id }), keywords: t('mail.folders') })
+    out.push({ id: 'contacts', label: t('home.contacts'), icon: 'contacts', group: goTo, run: () => navigate('/contacts') })
+
+    if (list.length) out.push({ id: 'compose', label: t('compose.new'), icon: 'compose', group: act, hint: 'c', run: newMessage })
+    if (thread) {
+      out.push({ id: 'reply', label: t('compose.replyAction'), icon: 'reply', group: act, hint: 'r', run: () => key('r') })
+      out.push({ id: 'replyAll', label: t('compose.replyAll'), icon: 'reply', group: act, hint: 'a', run: () => key('a') })
+      out.push({ id: 'forward', label: t('compose.forwardAction'), icon: 'forward', group: act, hint: 'f', run: () => key('f') })
+      for (const a of actions) {
+        out.push({ id: `move-${a}`, label: t(`actions.${a}`), icon: ACTION_ICONS[a], group: act, run: () => moveIds(a, [thread]) })
+      }
+      if (focus) {
+        out.push({ id: 'later', label: t('flow.replyLater'), icon: 'later', group: act, hint: 'l', run: () => key('l') })
+        out.push({ id: 'aside', label: t('flow.aside'), icon: 'pin', group: act, hint: 'p', run: () => key('p') })
+      }
+    }
+    out.push({ id: 'shortcuts', label: t('shortcuts.title'), icon: 'keyboard', group: act, hint: '?', run: () => setHelp(true) })
+
+    const other = focus ? 'classic' : 'focus'
+    out.push({ id: 'mode', label: t('palette.mode', { mode: t(`look.modes.${other}`) }), icon: 'sliders', group: prefs, run: () => setPref({ mode: other }) })
+    for (const theme of ['light', 'dark', 'system'] as const) {
+      if (theme !== me.preferences.theme) {
+        out.push({ id: `theme-${theme}`, label: t('palette.theme', { theme: t(`look.themes.${theme}`) }), icon: 'sun', group: prefs, keywords: 'tema theme', run: () => setPref({ theme }) })
+      }
+    }
+    for (const tab of ['look', 'security', 'accounts', 'identities', 'labels', 'api']) {
+      out.push({ id: `settings-${tab}`, label: `${t('home.settings')}: ${t(`settings.tabs.${tab}`)}`, icon: 'sliders', group: prefs, run: () => navigate(`/settings/${tab}`) })
+    }
+    out.push({ id: 'logout', label: t('home.logout'), icon: 'back', group: prefs, run: logout })
+    return out
+  }
   useEffect(() => {
     let prefix = ''
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -301,7 +374,7 @@ function Mail({ me }: { me: Me }) {
       if (prefix === 'g') {
         prefix = ''
         clearTimeout(timer)
-        if ('isda'.includes(k)) {
+        if ('isdat'.includes(k)) {
           e.preventDefault()
           keyRef.current(`g${k}`)
         }
@@ -385,7 +458,10 @@ function Mail({ me }: { me: Me }) {
         </div>
       )}
       <section className={`${thread ? 'hidden md:flex' : 'flex'} min-h-0 w-full shrink-0 flex-col border-r border-line bg-surface md:w-[22rem] lg:w-[26rem]`}>
-        {view === 'screener' && !search ? (
+        {page ? (
+          <PageView page={page} me={me} account={account} onMenu={() => setDrawer(true)}
+            onBox={(b) => go({ b })} onOpen={(id) => go({ t: id })} />
+        ) : view === 'screener' && !search ? (
           <Screener selected={thread} onOpen={(id) => go({ t: id })} onMenu={() => setDrawer(true)}
             onBlocked={() => go({ b: { view: 'blocked' } })} />
         ) : (
@@ -412,7 +488,12 @@ function Mail({ me }: { me: Me }) {
         title={t('shortcuts.open')} aria-label={t('shortcuts.open')} onClick={() => setHelp(true)}>
         <Icon name="keyboard" />
       </button>
+      <button className="fixed bottom-4 right-16 z-10 hidden size-9 place-items-center rounded-full border border-line bg-surface text-muted shadow hover:text-fg lg:grid"
+        title={`${t('palette.title')} (Ctrl+K)`} aria-label={t('palette.title')} onClick={() => setPalette(true)}>
+        <Icon name="command" />
+      </button>
       {help && <Shortcuts onClose={() => setHelp(false)} />}
+      {palette && <CommandPalette commands={commands()} onClose={() => setPalette(false)} onSearch={(q) => go({ q, t: null })} />}
     </div>
   )
 }

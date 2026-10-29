@@ -6,10 +6,11 @@ import StarterKit from '@tiptap/starter-kit'
 import { Placeholder } from '@tiptap/extensions'
 import { api, ApiError, type Identity, type Upload } from '../../lib/api'
 import { swapSignature, textFromDoc, toDraftInput, type ComposeState } from '../../lib/compose'
-import { fileSize } from '../../lib/mail'
 import { Alert } from '../ui'
 import { Icon } from '../mail/Icons'
 import { RecipientField } from './RecipientField'
+import { Popover } from '../mail/Menus'
+import { fileSize, snoozeOptions } from '../../lib/mail'
 
 /** Lo mismo que admite el servidor. */
 const MAX_UPLOAD = 25 * 1024 * 1024
@@ -21,7 +22,13 @@ export interface Outgoing {
   state: ComposeState
   html: string
   text: string
+  /** Programado para esta fecha (segundos Unix). */
+  sendAt?: number
+  /** Avisar si nadie responde en estos días. */
+  followUp?: number
 }
+
+const FOLLOW_UP_DAYS = [1, 3, 7, 14]
 
 /**
  * Ventana de redactar. En el móvil ocupa la pantalla; en el escritorio flota abajo a la
@@ -45,6 +52,7 @@ export function Composer({ initial, error, onClose, onSend }: {
   const [problem, setProblem] = useState<string | null>(error ?? null)
   const [saved, setSaved] = useState<'idle' | 'saving' | 'saved'>('idle')
   const [dragging, setDragging] = useState(false)
+  const [followUp, setFollowUp] = useState(0)
   const dirty = useRef(false)
   const chain = useRef<Promise<unknown>>(Promise.resolve())
   const fileInput = useRef<HTMLInputElement>(null)
@@ -154,7 +162,7 @@ export function Composer({ initial, error, onClose, onSend }: {
     onClose(false)
   }
 
-  async function send() {
+  async function send(sendAt?: number) {
     const s = stateRef.current
     if (!s.to.length && !s.cc.length && !s.bcc.length) {
       setProblem(t('compose.noRecipients'))
@@ -168,7 +176,7 @@ export function Composer({ initial, error, onClose, onSend }: {
     // Queda guardado por si se cierra la pestaña antes de que salga.
     dirty.current = true
     await save()
-    onSend({ state: stateRef.current, html: editor?.getHTML() ?? s.html, text: text(editor) })
+    onSend({ state: stateRef.current, html: editor?.getHTML() ?? s.html, text: text(editor), sendAt, followUp })
   }
 
   function onKey(e: React.KeyboardEvent) {
@@ -282,10 +290,27 @@ export function Composer({ initial, error, onClose, onSend }: {
 
       {problem && <div className="px-4 pb-2 pt-2"><Alert>{problem}</Alert></div>}
 
-      <footer className="flex items-center gap-1 border-t border-line px-3 py-2">
-        <button type="button" className="btn btn-primary px-5" onClick={send}>
+      <footer className="relative flex items-center gap-1 border-t border-line px-3 py-2">
+        <button type="button" className="btn btn-primary px-5" onClick={() => send()}>
           <Icon name="sent" /> {t('compose.send')}
         </button>
+        <ScheduleMenu onPick={(at) => send(at)} />
+        <Popover label={followUp ? t('compose.followUpOn', { count: followUp }) : t('compose.followUp')} icon="bell"
+          compact up fromParent active={followUp > 0}>
+          {(close) => (
+            <>
+              <p className="px-3 pb-1 pt-2 text-sm text-muted">{t('compose.followUpHint')}</p>
+              {[0, ...FOLLOW_UP_DAYS].map((d) => (
+                <button key={d} type="button" role="menuitemradio" aria-checked={followUp === d}
+                  className={`flex w-full items-center justify-between px-3 py-2 text-left hover:bg-surface-2 ${followUp === d ? 'font-semibold' : ''}`}
+                  onClick={() => { setFollowUp(d); close() }}>
+                  {d ? t('compose.followUpDays', { count: d }) : t('compose.followUpOff')}
+                  {followUp === d && <Icon name="check" className="size-4 text-accent" />}
+                </button>
+              ))}
+            </>
+          )}
+        </Popover>
         <button type="button" className="btn btn-ghost px-2.5" onClick={() => fileInput.current?.click()}
           aria-label={t('compose.attach')} title={t('compose.attach')}>
           <Icon name="clip" />
@@ -298,5 +323,39 @@ export function Composer({ initial, error, onClose, onSend }: {
         </button>
       </footer>
     </div>
+  )
+}
+
+/** «Programar envío»: mañana a primera hora, el lunes… o la fecha que se elija. */
+function ScheduleMenu({ onPick }: { onPick: (at: number) => void }) {
+  const { t, i18n } = useTranslation()
+  const [pick, setPick] = useState('')
+  const fmt = (d: Date) => d.toLocaleString(i18n.language, { weekday: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  return (
+    <Popover label={t('compose.schedule')} icon="clock" compact up fromParent>
+      {(close) => (
+        <>
+          {snoozeOptions().map((o) => (
+            <button key={o.key} type="button" role="menuitem" className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-surface-2"
+              onClick={() => { close(); onPick(Math.floor(o.at.getTime() / 1000)) }}>
+              <span>{t(`flow.snoozeOptions.${o.key}`)}</span>
+              <span className="text-sm text-muted">{fmt(o.at)}</span>
+            </button>
+          ))}
+          <form className="flex gap-1 border-t border-line p-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              const at = new Date(pick).getTime()
+              if (!Number.isFinite(at) || at <= Date.now()) return
+              close()
+              onPick(Math.floor(at / 1000))
+            }}>
+            <input type="datetime-local" className="input min-h-9 min-w-0 flex-1 py-1 text-sm" aria-label={t('compose.scheduleAt')}
+              value={pick} onChange={(e) => setPick(e.target.value)} />
+            <button className="btn min-h-9 px-2.5 py-1 text-sm" disabled={!pick}>OK</button>
+          </form>
+        </>
+      )}
+    </Popover>
   )
 }

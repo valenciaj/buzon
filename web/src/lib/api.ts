@@ -14,6 +14,8 @@ export interface Preferences {
   font: Font
   font_size: number
   density: Density
+  /** Segundos para deshacer un envío: 0, 5, 10, 20 o 30. */
+  undo_send: number
 }
 
 export interface Me {
@@ -233,6 +235,28 @@ export interface Draft extends Omit<DraftInput, 'attachments'> {
   id: string
   attachments: Upload[]
   updated_at: number
+  /** Cuándo sale, si está programado (negativo: está saliendo). */
+  send_at: number | null
+  send_error: string | null
+  follow_up_days: number | null
+}
+
+export interface SendOptions {
+  draft_id?: string | null
+  /** Segundos Unix: sale entonces (y hasta entonces se puede cancelar). */
+  send_at?: number
+  /** Avisar si nadie responde en estos días. */
+  follow_up_days?: number
+}
+
+export interface FollowUp {
+  id: string
+  account_id: string
+  subject: string
+  to: Addr[]
+  sent_at: number
+  due_at: number
+  thread: string | null
 }
 
 export interface Label {
@@ -407,7 +431,12 @@ export const api = {
   createDraft: (d: DraftInput) => call<Draft>('POST', '/drafts', d),
   updateDraft: (id: string, d: DraftInput) => call<Draft>('PUT', `/drafts/${id}`, d),
   deleteDraft: (id: string) => call<void>('DELETE', `/drafts/${id}`),
-  send: (d: DraftInput & { draft_id?: string | null }) => call<{ message_id: string }>('POST', '/send', d),
+  send: (d: DraftInput & SendOptions) =>
+    call<{ message_id: string | null; scheduled_id: string | null; send_at: number | null }>('POST', '/send', d),
+  scheduled: () => call<Draft[]>('GET', '/scheduled'),
+  cancelScheduled: (id: string) => call<Draft>('POST', `/scheduled/${id}/cancel`),
+  followups: (due = false) => call<FollowUp[]>('GET', `/followups${due ? '?due=true' : ''}`),
+  dismissFollowup: (id: string) => call<void>('DELETE', `/followups/${id}`),
   suggest: (q: string) => call<Addr[]>('GET', `/contacts/suggest${query({ q })}`),
   contacts: (q?: string) => call<Contact[]>('GET', `/contacts${query({ q })}`),
   createContact: (c: ContactInput) => call<Contact>('POST', '/contacts', c),

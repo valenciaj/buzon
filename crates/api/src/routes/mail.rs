@@ -315,13 +315,19 @@ pub async fn attachment(
     responses((status = 200, description = "Flujo de eventos", content_type = "text/event-stream")))]
 pub async fn events(State(st): State<Arc<AppState>>, cu: CurrentUser) -> impl IntoResponse {
     let user = cu.user.id;
+    let changes = BroadcastStream::new(st.sync.subscribe()).filter_map(move |r| match r {
+        Ok(e) if e.user == user => Event::default().event(e.kind).json_data(&e).ok().map(Ok),
+        Ok(_) => None,
+        // Si se pierden avisos, que la web lo recargue todo.
+        Err(_) => Some(Ok(Event::default().event("mail").data("{}"))),
+    });
+    // Correo nuevo, con remitente y asunto, para las notificaciones del navegador.
+    let notices = BroadcastStream::new(st.notices.subscribe()).filter_map(move |r| match r {
+        Ok((u, data)) if u == user => Event::default().event("message").json_data(&data).ok().map(Ok),
+        _ => None,
+    });
     let stream: std::pin::Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>> =
-        Box::pin(BroadcastStream::new(st.sync.subscribe()).filter_map(move |r| match r {
-            Ok(e) if e.user == user => Event::default().event(e.kind).json_data(&e).ok().map(Ok),
-            Ok(_) => None,
-            // Si se pierden avisos, que la web lo recargue todo.
-            Err(_) => Some(Ok(Event::default().event("mail").data("{}"))),
-        }));
+        Box::pin(changes.merge(notices));
     (
         [(HeaderName::from_static("x-accel-buffering"), "no")],
         Sse::new(stream).keep_alive(KeepAlive::default()),

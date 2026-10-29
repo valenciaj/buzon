@@ -33,6 +33,8 @@ export function Sidebar({ me, accounts, mailboxes, account, box, onAccount, onBo
   const [more, setMore] = useState(false)
   const labels = useQuery({ queryKey: ['labels'], queryFn: api.labels })
   const flow = useQuery({ queryKey: ['flow', account ?? null], queryFn: () => api.flowCounts(account), enabled: focus })
+  const scheduled = useQuery({ queryKey: ['scheduled'], queryFn: api.scheduled })
+  const due = useQuery({ queryKey: ['followups', 'due'], queryFn: () => api.followups(true) })
   const counts = flow.data
   const viewCount = (v: View): number => {
     if (!counts) return 0
@@ -69,7 +71,7 @@ export function Sidebar({ me, accounts, mailboxes, account, box, onAccount, onBo
           : <Icon name={icon} className="shrink-0 text-muted" />}
         <span className="min-w-0 flex-1 truncate">{label}</span>
         {dot && <span className="size-2 shrink-0 rounded-full" style={{ background: dot }} />}
-        {count > 0 && <span className={`text-sm tabular-nums ${key === 'inbox' || key === 'v:principal' || key === 'v:screener' ? 'font-bold text-accent' : 'text-muted'}`}>{count}</span>}
+        {count > 0 && <span className={`text-sm tabular-nums ${key === 'inbox' || key === 'v:principal' || key === 'v:screener' || key === 'p:followups' ? 'font-bold text-accent' : 'text-muted'}`}>{count}</span>}
       </button>
     </li>
   )
@@ -99,6 +101,9 @@ export function Sidebar({ me, accounts, mailboxes, account, box, onAccount, onBo
           </div>
         </div>
       )}
+      <ul className="-mb-3 flex flex-col gap-0.5">
+        {item('p:today', t('pages.today'), 'sun', 0, () => onBox({ page: 'today' }))}
+      </ul>
       {focus && (
         <>
           <ul className="flex flex-col gap-0.5">
@@ -114,6 +119,8 @@ export function Sidebar({ me, accounts, mailboxes, account, box, onAccount, onBo
       )}
       <ul className="flex flex-col gap-0.5">
         {main.map((r) => item(r, roleLabel(r), r, r === 'inbox' || r === 'junk' || !focus ? unread[r] ?? 0 : 0, () => onBox({ role: r })))}
+        {(scheduled.data?.length ?? 0) > 0 && item('p:scheduled', t('pages.scheduled'), 'clock', scheduled.data!.length, () => onBox({ page: 'scheduled' }))}
+        {item('p:followups', t('pages.followups'), 'bell', due.data?.length ?? 0, () => onBox({ page: 'followups' }))}
       </ul>
       {(extraRoles.length > 0 || folders.length > 0) && (
         <div className="flex flex-col gap-1">

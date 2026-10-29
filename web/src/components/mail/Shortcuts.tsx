@@ -9,7 +9,8 @@ const KEYS: [string, string][] = [
   ['⇧ I', 'read'], ['⇧ U', 'unread'], ['x', 'select'],
   ['l', 'replyLater'], ['p', 'aside'], ['b', 'snooze'],
   ['r', 'reply'], ['a', 'replyAll'], ['f', 'forward'], ['c', 'compose'], ['/', 'search'],
-  ['g i', 'goInbox'], ['g s', 'goSent'], ['g d', 'goDrafts'], ['g a', 'goArchive'], ['?', 'help'],
+  ['g t', 'goToday'], ['g i', 'goInbox'], ['g s', 'goSent'], ['g d', 'goDrafts'], ['g a', 'goArchive'],
+  ['Ctrl K', 'palette'], ['?', 'help'],
 ]
 
 export function Shortcuts({ onClose }: { onClose: () => void }) {

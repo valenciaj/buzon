@@ -283,7 +283,18 @@
     "fwdSubject": "Subject:",
     "fwdTo": "To:",
     "localDrafts": "Buzón drafts",
-    "draft": "Draft"
+    "draft": "Draft",
+    "scheduledFor": "Scheduled for {{when}}.",
+    "schedule": "Schedule send",
+    "scheduleAt": "Pick date and time",
+    "followUp": "Remind me if there's no reply",
+    "followUpOn_one": "Reminder if no reply in {{count}} day",
+    "followUpOn_other": "Reminder if no reply in {{count}} days",
+    "followUpHint": "It will show up in \"No reply\" if nobody answers.",
+    "followUpDays_one": "In {{count}} day",
+    "followUpDays_other": "In {{count}} days",
+    "followUpOff": "Don't remind me",
+    "sendFailed": "Not sent: {{error}}"
   },
   "identity": {
     "intro": "The addresses you write from: each account's own and its aliases. Each one can have its own signature.",
@@ -442,7 +453,9 @@
     "then": "then",
     "replyLater": "Reply later",
     "aside": "Set aside",
-    "snooze": "Snooze until tomorrow"
+    "snooze": "Snooze until tomorrow",
+    "goToday": "Go to Today",
+    "palette": "Command palette"
   },
   "flow": {
     "views": {
@@ -585,5 +598,63 @@
       "failed": "Failed",
       "pending": "Pending"
     }
+  },
+  "pages": {
+    "today": "Today",
+    "scheduled": "Scheduled",
+    "followups": "No reply"
+  },
+  "today": {
+    "title": "Today",
+    "unreadPrincipal": "unread in Main",
+    "unreadInbox": "unread in the inbox",
+    "noReply": "No reply",
+    "scheduled": "Scheduled",
+    "allClear": "All clear: nothing is waiting.",
+    "sentTo": "To {{who}} · {{date}}",
+    "leavingSoon": "Leaving in the next 24 hours"
+  },
+  "scheduled": {
+    "intro": "Emails that will go out on their own. You can change or cancel them until then.",
+    "none": "Nothing scheduled.",
+    "at": "Sends on {{when}}",
+    "leaving": "Sending now…",
+    "edit": "Change",
+    "cancel": "Cancel send",
+    "cancelled": "Send cancelled. It's in Drafts."
+  },
+  "followups": {
+    "intro": "Emails you sent asking for a reminder. They disappear once someone replies.",
+    "none": "You're not waiting on anyone.",
+    "overdue": "No reply yet",
+    "waiting": "Waiting until {{date}}",
+    "dismiss": "Stop waiting"
+  },
+  "palette": {
+    "title": "Command palette",
+    "placeholder": "What do you want to do? (go to, compose, theme…)",
+    "none": "Nothing matches that.",
+    "search": "Search mail for \"{{q}}\"",
+    "mode": "Switch to {{mode}} mode",
+    "theme": "Theme: {{theme}}",
+    "groups": {
+      "go": "Go to",
+      "actions": "Actions",
+      "settings": "Settings",
+      "search": "Search"
+    }
+  },
+  "prefs": {
+    "title": "Sending and notifications",
+    "undo": "Undo send",
+    "undoHint": "Time to change your mind after pressing Send.",
+    "seconds_one": "{{count}} s",
+    "seconds_other": "{{count}} s",
+    "noUndo": "No delay",
+    "notify": "Notifications",
+    "notifyBody": "Notify me on this device when mail arrives (in Focus, only for Main).",
+    "notifyUnsupported": "This browser doesn't support notifications.",
+    "notifyDenied": "The browser is blocking them. Allow them in the site settings.",
+    "installHint": "On your phone, add Buzón to the home screen to use it like an app."
   }
 }
