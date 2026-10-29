@@ -626,12 +626,50 @@ async fn new_accounts_are_checked_against_the_server() {
         "sin cifrar no se permite por defecto"
     );
 
-    let mut unchecked = account;
+    let mut unchecked = account.clone();
     unchecked["verify"] = json!(false);
     let r = t.call("POST", "/api/v1/accounts", Some(&cookie), Some(unchecked)).await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    let id = r.body["id"].as_str().unwrap().to_string();
     let list = t.call("GET", "/api/v1/accounts", Some(&cookie), None).await;
     assert_eq!(list.body.as_array().unwrap().len(), 2);
+
+    // Editar: también se comprueba con el servidor antes de guardar.
+    let url = format!("/api/v1/accounts/{id}");
+    let mut edit = account;
+    edit["name"] = json!("Oficina");
+    edit["email"] = json!("javier@trabajo.es");
+    edit["imap_host"] = json!("127.0.0.2");
+    edit["password"] = json!("");
+    let r = t.call("PUT", &url, Some(&cookie), Some(edit.clone())).await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", r.body);
+    edit["verify"] = json!(false);
+    let r = t.call("PUT", &url, Some(&cookie), Some(edit.clone())).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    assert_eq!(r.body["name"], "Oficina");
+    assert_eq!(r.body["imap_host"], "127.0.0.2");
+    assert!(r.body.get("password").is_none());
+    // La identidad sigue a la dirección nueva.
+    let ids = t.call("GET", "/api/v1/identities", Some(&cookie), None).await;
+    let mine: Vec<&Value> = ids
+        .body
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|i| i["account_id"] == id.as_str())
+        .collect();
+    assert!(
+        !mine.is_empty() && mine.iter().all(|i| i["email"] == "javier@trabajo.es"),
+        "{}",
+        ids.body
+    );
+    edit["name"] = json!("");
+    let r = t.call("PUT", &url, Some(&cookie), Some(edit)).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    let r = t
+        .call("PUT", "/api/v1/accounts/3sNoExiste", Some(&cookie), Some(json!({})))
+        .await;
+    assert!(r.status.is_client_error());
 }
 
 /// Servidor SMTP mínimo: acepta un envío y devuelve el sobre y el mensaje recibidos.

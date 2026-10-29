@@ -418,6 +418,7 @@ export const api = {
   totpDisable: (password: string) => call<Me>('POST', '/me/totp/disable', { password }),
   accounts: () => call<Account[]>('GET', '/accounts'),
   addAccount: (a: AccountInput) => call<Account>('POST', '/accounts', a),
+  updateAccount: (id: string, a: AccountInput) => call<Account>('PUT', `/accounts/${id}`, a),
   deleteAccount: (id: string) => call<void>('DELETE', `/accounts/${id}`),
   oauthProviders: () => call<{ providers: OAuthProvider[] }>('GET', '/oauth/providers'),
   oauthStart: (provider: OAuthProvider, login_hint?: string) =>

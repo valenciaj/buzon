@@ -23,6 +23,7 @@ Turn [two-step verification](./getting-started#two-step-verification) on or off.
 Here you see each account's state (up to date, syncing, error) and the last sync. You can:
 
 - **Sync now**, without waiting for the next round.
+- **Edit** its details: servers, ports, username or password (leave the password empty to keep the current one). Buzón checks them with the server before saving. Gmail and Outlook accounts can only change their name.
 - **Connect with Google or Microsoft** (if the administrator has enabled it), without a password. If you ever revoke access or it expires, click **Reconnect**.
 - **Add an account** with an IMAP and SMTP server. Always use TLS or STARTTLS.
 - **Delete** an account from Buzón. This deletes the mail stored in Buzón, not on your server.

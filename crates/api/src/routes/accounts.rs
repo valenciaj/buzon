@@ -3,7 +3,7 @@ use std::sync::Arc;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
-use buzon_store::user::user_raw_dir;
+use buzon_store::user::{user_raw_dir, NewAccount};
 use buzon_store::Id;
 use buzon_sync::{Auth, Security, ServerConfig};
 
@@ -14,13 +14,18 @@ use crate::session::CurrentUser;
 use crate::{validate, AppState};
 
 pub fn validate_account(a: &AccountInput) -> ApiResult<()> {
+    validate::non_empty("password", &a.password)?;
+    validate_account_fields(a)
+}
+
+/// Todo menos la contraseña, que al editar puede quedarse vacía (no cambia).
+fn validate_account_fields(a: &AccountInput) -> ApiResult<()> {
     for (f, v) in [
         ("name", &a.name),
         ("email", &a.email),
         ("imap_host", &a.imap_host),
         ("smtp_host", &a.smtp_host),
         ("login", &a.login),
-        ("password", &a.password),
     ] {
         validate::non_empty(f, v)?;
     }
@@ -82,25 +87,110 @@ pub async fn create(
     validate_account(&req)?;
     check_security(&st, &req)?;
     if req.verify {
-        let cfg = ServerConfig {
-            host: req.imap_host.trim().to_string(),
-            port: req.imap_port,
-            security: Security::parse(&req.imap_security).unwrap_or(Security::Tls),
-            login: req.login.trim().to_string(),
-            auth: Auth::Password(req.password.clone()),
-        };
-        if let Err(e) = buzon_sync::check(&cfg).await {
-            return Err(ApiError::new(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "mail_login_failed",
-                format!("No se pudo entrar en {}: {e}.", cfg.host),
-            ));
-        }
+        verify_login(&req, &req.password).await?;
     }
     let udb = st.user_db(cu.user.id).await?;
     let acc = udb.add_account(new_account(&req), &st.secrets_for(cu.user.id)).await?;
     st.start_account(cu.user.id, &acc).await?;
     let state = st.sync.state(acc.id);
+    Ok(Json(AccountOut::new(acc, state)))
+}
+
+/// Comprueba que el servidor IMAP acepta el usuario y la contraseña.
+async fn verify_login(req: &AccountInput, password: &str) -> ApiResult<()> {
+    let cfg = ServerConfig {
+        host: req.imap_host.trim().to_string(),
+        port: req.imap_port,
+        security: Security::parse(&req.imap_security).unwrap_or(Security::Tls),
+        login: req.login.trim().to_string(),
+        auth: Auth::Password(password.to_string()),
+    };
+    buzon_sync::check(&cfg).await.map_err(|e| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "mail_login_failed",
+            format!("No se pudo entrar en {}: {e}.", cfg.host),
+        )
+    })
+}
+
+/// Cambia los datos de una cuenta y vuelve a sincronizarla. Con `password` vacía se queda
+/// la que había. En las cuentas de Gmail y Outlook (OAuth2) solo se puede cambiar el nombre.
+/// Antes comprueba que el servidor IMAP acepta los datos nuevos (salvo con `verify: false`).
+#[utoipa::path(put, path = "/api/v1/accounts/{id}", tag = "accounts", request_body = AccountInput,
+    params(("id" = String, Path, description = "Id de la cuenta")),
+    responses((status = 200, body = AccountOut), (status = 400, body = ErrorBody), (status = 404, body = ErrorBody),
+        (status = 422, description = "No se pudo entrar en el servidor IMAP", body = ErrorBody)))]
+pub async fn update(
+    State(st): State<Arc<AppState>>,
+    cu: CurrentUser,
+    Path(id): Path<String>,
+    Json(req): Json<AccountInput>,
+) -> ApiResult<Json<AccountOut>> {
+    let id = parse_id(&id)?;
+    let user = cu.user.id;
+    let udb = st.user_db(user).await?;
+    let acc = udb
+        .account(id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Esa cuenta no existe."))?;
+    let secrets = st.secrets_for(user);
+    if acc.auth != "password" {
+        validate::non_empty("name", &req.name)?;
+        let same = AccountInput {
+            name: req.name.clone(),
+            email: acc.email.clone(),
+            imap_host: acc.imap_host.clone(),
+            imap_port: acc.imap_port,
+            smtp_host: acc.smtp_host.clone(),
+            smtp_port: acc.smtp_port,
+            login: acc.login.clone(),
+            password: String::new(),
+            imap_security: acc.imap_security.clone(),
+            smtp_security: acc.smtp_security.clone(),
+            verify: false,
+        };
+        udb.update_account(
+            id,
+            NewAccount {
+                auth: &acc.auth,
+                ..new_account(&same)
+            },
+            &secrets,
+        )
+        .await?;
+    } else {
+        validate_account_fields(&req)?;
+        check_security(&st, &req)?;
+        if req.verify {
+            let password = match req.password.as_str() {
+                "" => udb.account_password(id, &secrets).await?.unwrap_or_default(),
+                p => p.to_string(),
+            };
+            verify_login(&req, &password).await?;
+        }
+        udb.update_account(id, new_account(&req), &secrets).await?;
+        // La identidad con la dirección de antes pasa a la nueva.
+        let email = req.email.trim();
+        if !email.eq_ignore_ascii_case(&acc.email) {
+            for mut i in udb.identities(Some(id)).await? {
+                if i.email.eq_ignore_ascii_case(&acc.email) {
+                    i.email = email.to_string();
+                    udb.save_identity(&i).await?;
+                }
+            }
+        }
+        st.sync.stop(id);
+    }
+    let acc = udb
+        .account(id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Esa cuenta no existe."))?;
+    if acc.auth == "password" {
+        st.start_account(user, &acc).await?;
+    }
+    st.db.audit(Some(user), "account.updated", Some(&acc.email)).await?;
+    let state = st.sync.state(id);
     Ok(Json(AccountOut::new(acc, state)))
 }
 
