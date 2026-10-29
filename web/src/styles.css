@@ -67,6 +67,7 @@ h1, h2, h3 { text-wrap: balance; }
     @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-line bg-surface px-4 py-2 font-semibold text-fg hover:border-muted disabled:opacity-60;
   }
   .btn-primary { @apply border-accent bg-accent text-on-accent hover:border-accent; }
+  .btn-danger { @apply border-crit bg-crit text-bg hover:border-crit; }
   .btn-ghost { @apply border-transparent bg-transparent hover:bg-surface-2; }
   .input {
     @apply min-h-10 w-full rounded-lg border border-line bg-bg px-3 py-2 text-fg;

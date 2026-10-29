@@ -7,6 +7,7 @@ import './lib/look'
 import './styles.css'
 import App from './App'
 import { ToastProvider } from './components/Toaster'
+import { ConfirmProvider } from './components/Confirm'
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { refetchOnWindowFocus: false } } })
 
@@ -15,7 +16,9 @@ createRoot(document.getElementById('root')!).render(
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <ToastProvider>
-          <App />
+          <ConfirmProvider>
+            <App />
+          </ConfirmProvider>
         </ToastProvider>
       </BrowserRouter>
     </QueryClientProvider>

@@ -15,6 +15,7 @@ import { ApiPanel } from '../components/ApiPanel'
 import { MailPrefs } from '../components/MailPrefs'
 import { manualUrl } from '../lib/manual'
 import { Icon } from '../components/mail/Icons'
+import { useConfirm } from '../components/Confirm'
 
 const TABS = ['look', 'security', 'accounts', 'identities', 'labels', 'api', 'invitations'] as const
 type Tab = (typeof TABS)[number]
@@ -139,6 +140,7 @@ function SecurityTab({ me }: { me: Me }) {
 
 function AccountsTab() {
   const { t, i18n } = useTranslation()
+  const confirm = useConfirm()
   const qc = useQueryClient()
   const accounts = useQuery({ queryKey: ['accounts'], queryFn: api.accounts, refetchInterval: 5000 })
   const [draft, setDraft] = useState<AccountInput>(EMPTY_ACCOUNT)
@@ -202,7 +204,7 @@ function AccountsTab() {
                   </button>
                 )}
                 <button className="btn btn-ghost text-crit" disabled={remove.isPending}
-                  onClick={() => { if (window.confirm(t('account.deleteConfirm', { name: a.name }))) remove.mutate(a.id) }}>
+                  onClick={async () => { if (await confirm({ text: t('account.deleteConfirm', { name: a.name }), ok: t('common.delete'), danger: true })) remove.mutate(a.id) }}>
                   {t('account.delete')}
                 </button>
               </div>
@@ -385,6 +387,7 @@ function IdentitiesTab() {
 
 function IdentityCard({ identity, account, onDone }: { identity?: Identity; account?: string; onDone?: () => void }) {
   const { t } = useTranslation()
+  const confirm = useConfirm()
   const qc = useQueryClient()
   const [value, setValue] = useState<IdentityInput>({
     account_id: identity?.account_id ?? account,
@@ -433,7 +436,7 @@ function IdentityCard({ identity, account, onDone }: { identity?: Identity; acco
         <button className="btn btn-primary" disabled={save.isPending}>{t('identity.save')}</button>
         {identity ? (
           <button type="button" className="btn btn-ghost text-crit" disabled={remove.isPending}
-            onClick={() => { if (window.confirm(t('identity.deleteConfirm', { email: identity.email }))) remove.mutate() }}>
+            onClick={async () => { if (await confirm({ text: t('identity.deleteConfirm', { email: identity.email }), ok: t('common.delete'), danger: true })) remove.mutate() }}>
             {t('identity.delete')}
           </button>
         ) : (

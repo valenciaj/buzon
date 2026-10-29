@@ -10,7 +10,9 @@
     "loading": "Loading…",
     "copy": "Copy",
     "copied": "Copied",
-    "error": "Something went wrong. Please try again."
+    "error": "Something went wrong. Please try again.",
+    "ok": "OK",
+    "delete": "Delete"
   },
   "fields": {
     "username": "Buzón username",
@@ -480,7 +482,12 @@
     "aside": "Set aside",
     "snooze": "Snooze until tomorrow",
     "goToday": "Go to Today",
-    "palette": "Command palette"
+    "palette": "Command palette",
+    "or": "or",
+    "groups": {
+      "move": "Moving around",
+      "act": "Actions"
+    }
   },
   "flow": {
     "views": {

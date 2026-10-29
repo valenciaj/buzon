@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { api, ApiError, type Label, type Rule, type RuleInput } from '../lib/api'
 import { LABEL_COLORS } from '../lib/mail'
 import { Alert, Field } from './ui'
+import { useConfirm } from './Confirm'
 
 const errorText = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback)
 
@@ -41,6 +42,7 @@ function Labels() {
 
 function LabelRow({ label }: { label: Label }) {
   const { t } = useTranslation()
+  const confirm = useConfirm()
   const qc = useQueryClient()
   const [editing, setEditing] = useState(false)
   const remove = useMutation({
@@ -61,7 +63,7 @@ function LabelRow({ label }: { label: Label }) {
       </span>
       <button className="btn btn-ghost px-2.5" onClick={() => setEditing(true)}>{t('labels.edit')}</button>
       <button className="btn btn-ghost px-2.5 text-crit" disabled={remove.isPending}
-        onClick={() => window.confirm(t('labels.deleteConfirm', { name: label.name })) && remove.mutate()}>
+        onClick={async () => (await confirm({ text: t('labels.deleteConfirm', { name: label.name }), ok: t('common.delete'), danger: true })) && remove.mutate()}>
         {t('labels.delete')}
       </button>
     </div>
@@ -140,6 +142,7 @@ function Rules() {
 
 function RuleRow({ rule: r, onEdit }: { rule: Rule; onEdit: () => void }) {
   const { t } = useTranslation()
+  const confirm = useConfirm()
   const qc = useQueryClient()
   const labels = useQuery({ queryKey: ['labels'], queryFn: api.labels })
   const remove = useMutation({ mutationFn: () => api.deleteRule(r.id), onSuccess: () => qc.invalidateQueries({ queryKey: ['rules'] }) })
@@ -164,7 +167,7 @@ function RuleRow({ rule: r, onEdit }: { rule: Rule; onEdit: () => void }) {
       </div>
       <button className="btn btn-ghost px-2.5" onClick={onEdit}>{t('rules.edit')}</button>
       <button className="btn btn-ghost px-2.5 text-crit" disabled={remove.isPending}
-        onClick={() => window.confirm(t('rules.deleteConfirm', { name: r.name })) && remove.mutate()}>
+        onClick={async () => (await confirm({ text: t('rules.deleteConfirm', { name: r.name }), ok: t('common.delete'), danger: true })) && remove.mutate()}>
         {t('rules.delete')}
       </button>
     </div>

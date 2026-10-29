@@ -7,6 +7,7 @@ import { initials } from '../lib/mail'
 import { Alert, Field, Logo } from '../components/ui'
 import { Icon } from '../components/mail/Icons'
 import { useToast } from '../components/Toaster'
+import { useConfirm } from '../components/Confirm'
 
 const EMPTY: ContactInput = { name: '', email: '', phone: '', notes: '' }
 
@@ -84,6 +85,7 @@ export default function Contacts() {
 
 function ContactRow({ contact: c, onEdit, onDeleted }: { contact: Contact; onEdit: () => void; onDeleted: () => void }) {
   const { t } = useTranslation()
+  const confirm = useConfirm()
   const navigate = useNavigate()
   const remove = useMutation({ mutationFn: () => api.deleteContact(c.id), onSuccess: onDeleted })
   const name = c.name || c.email
@@ -104,7 +106,7 @@ function ContactRow({ contact: c, onEdit, onDeleted }: { contact: Contact; onEdi
         </button>
         <button className="btn btn-ghost px-2.5" onClick={onEdit}>{t('contacts.edit')}</button>
         <button className="btn btn-ghost px-2.5 text-crit" disabled={remove.isPending}
-          onClick={() => window.confirm(t('contacts.deleteConfirm', { name })) && remove.mutate()}>
+          onClick={async () => (await confirm({ text: t('contacts.deleteConfirm', { name }), ok: t('common.delete'), danger: true })) && remove.mutate()}>
           <Icon name="trash" /><span className="sr-only">{t('contacts.delete')}</span>
         </button>
       </div>

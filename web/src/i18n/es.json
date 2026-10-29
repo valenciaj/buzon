@@ -10,7 +10,9 @@
     "loading": "Cargando…",
     "copy": "Copiar",
     "copied": "Copiado",
-    "error": "Algo ha fallado. Vuelve a intentarlo."
+    "error": "Algo ha fallado. Vuelve a intentarlo.",
+    "ok": "Aceptar",
+    "delete": "Eliminar"
   },
   "fields": {
     "username": "Usuario de Buzón",
@@ -480,7 +482,12 @@
     "aside": "Apartar",
     "snooze": "Posponer hasta mañana",
     "goToday": "Ir a Hoy",
-    "palette": "Paleta de órdenes"
+    "palette": "Paleta de órdenes",
+    "or": "o",
+    "groups": {
+      "move": "Moverse",
+      "act": "Actuar"
+    }
   },
   "flow": {
     "views": {

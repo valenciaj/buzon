@@ -6,6 +6,7 @@ import {
   type ApiToken, type Delivery, type HookEvent, type Scope, type Webhook,
 } from '../lib/api'
 import { Alert, Field } from './ui'
+import { useConfirm } from './Confirm'
 
 const EXPIRY = [0, 30, 90, 365] as const
 
@@ -79,6 +80,7 @@ export function ApiPanel() {
 
 function Tokens() {
   const { t } = useTranslation()
+  const confirm = useConfirm()
   const date = useDate()
   const qc = useQueryClient()
   const list = useQuery({ queryKey: ['tokens'], queryFn: api.tokens })
@@ -123,7 +125,7 @@ function Tokens() {
                 <b className="min-w-0 [overflow-wrap:anywhere]">{k.name}</b>
                 <code className="text-sm text-muted">{k.prefix}…</code>
                 <button className="btn btn-ghost ml-auto px-2.5 text-crit" disabled={revoke.isPending}
-                  onClick={() => { if (window.confirm(t('api.tokens.revokeConfirm', { name: k.name }))) revoke.mutate(k.id) }}>
+                  onClick={async () => { if (await confirm({ text: t('api.tokens.revokeConfirm', { name: k.name }), ok: t('api.tokens.revoke'), danger: true })) revoke.mutate(k.id) }}>
                   {t('api.tokens.revoke')}
                 </button>
               </div>
@@ -182,6 +184,7 @@ const STATUS_TONE = { ok: 'text-good', failed: 'text-crit', pending: 'text-muted
 
 function WebhookCard({ hook: w }: { hook: Webhook }) {
   const { t } = useTranslation()
+  const confirm = useConfirm()
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
   const refresh = () => {
@@ -216,7 +219,7 @@ function WebhookCard({ hook: w }: { hook: Webhook }) {
           {w.active ? t('api.hooks.pause') : t('api.hooks.resume')}
         </button>
         <button className="btn btn-ghost text-crit" disabled={remove.isPending}
-          onClick={() => { if (window.confirm(t('api.hooks.deleteConfirm'))) remove.mutate() }}>
+          onClick={async () => { if (await confirm({ text: t('api.hooks.deleteConfirm'), ok: t('common.delete'), danger: true })) remove.mutate() }}>
           {t('api.hooks.delete')}
         </button>
       </div>
