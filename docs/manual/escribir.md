@@ -2,7 +2,7 @@
 
 ## Redactar un correo
 
-Pulsa **Redactar** (o <kbd>c</kbd>). Se abre una ventana con:
+Pulsa el botón redondo del lápiz **Redactar**, junto al logo o abajo a la derecha (o <kbd>c</kbd>). Se abre una ventana con:
 
 - **De:** la dirección desde la que envías, si tienes varias cuentas o identidades.
 - **Para, Cc y Cco:** escribe un nombre o una dirección; Buzón te sugiere tus contactos. Pulsa <kbd>Intro</kbd> o la coma para añadirla.

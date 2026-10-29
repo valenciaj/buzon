@@ -2,7 +2,7 @@
 
 ## Composing an email
 
-Click **Compose** (or <kbd>c</kbd>). A window opens with:
+Click the round pencil button **Compose**, next to the logo or at the bottom right (or <kbd>c</kbd>). A window opens with:
 
 - **From:** the address you send from, if you have several accounts or identities.
 - **To, Cc and Bcc:** type a name or an address; Buzón suggests your contacts. Press <kbd>Enter</kbd> or a comma to add it.
