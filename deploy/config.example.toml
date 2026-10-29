@@ -26,6 +26,10 @@ allow_insecure_mail = false
 # Actívalo solo si confías en todos los usuarios: permite llamar a servicios internos.
 allow_private_webhooks = false
 
+# Métricas para Prometheus/Grafana en GET /metrics. Sin token, la ruta no existe.
+# Genera uno con: openssl rand -hex 32
+# metrics_token = ""
+
 # Conectar Gmail y Outlook sin contraseña (OAuth2). Opcional: sin estas secciones,
 # esas cuentas se añaden con una contraseña de aplicación. La dirección de vuelta que hay
 # que registrar en el proveedor es <public_url>/api/v1/oauth/callback.

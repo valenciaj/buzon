@@ -134,6 +134,7 @@ async fn main() -> anyhow::Result<()> {
     .with_sync();
     state.allow_insecure_mail = cfg.allow_insecure_mail;
     state.allow_private_webhooks = cfg.allow_private_webhooks;
+    state.metrics_token = cfg.metrics_token.clone().filter(|t| !t.trim().is_empty());
     if let Some(g) = &cfg.oauth.google {
         let app = OAuthApp::google(g.client_id.clone(), g.client_secret.clone());
         state.oauth.insert(Provider::Google, Arc::new(app));

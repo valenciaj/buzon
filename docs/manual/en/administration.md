@@ -56,6 +56,7 @@ Everything is in `/etc/buzon/config.toml`, with comments. The most important opt
 | `listen` | where Buzón listens (local only: nginx is the proxy) |
 | `cookie_secure` | session cookie over HTTPS only (leave it `true`) |
 | `allow_private_webhooks` | allows webhooks to the local network and without HTTPS |
+| `metrics_token` | turns on the Grafana metrics at `/metrics` (see below) |
 | `[oauth.google]`, `[oauth.microsoft]` | connect Gmail and Outlook without a password |
 
 After changing anything: `sudo systemctl restart buzon`.
@@ -135,6 +136,41 @@ sudo ./deploy/install.sh mail.example.com
 ```
 
 It replaces the program and the web app and restarts Buzón. It doesn't touch the configuration or the data. Database migrations run automatically on start. Make a backup first, just in case.
+
+## Grafana metrics
+
+Buzón publishes its statistics at `/metrics`, in Prometheus format. To turn them on, set a token in the configuration and restart:
+
+```toml
+metrics_token = "put-a-long-token-here"   # openssl rand -hex 32
+```
+
+Without a token, `/metrics` doesn't exist. With one, every request must send it. In Prometheus:
+
+```yaml
+scrape_configs:
+  - job_name: buzon
+    scheme: https
+    authorization:
+      credentials: put-a-long-token-here
+    static_configs:
+      - targets: ["mail.example.com"]
+```
+
+Then add Prometheus as a data source in Grafana. The metrics:
+
+| Metric | What it is |
+| --- | --- |
+| `buzon_users` | users |
+| `buzon_accounts{state}` | mail accounts by state: `idle`, `syncing`, `connecting`, `error`, `off` |
+| `buzon_scheduled_sends` | scheduled emails not sent yet |
+| `buzon_webhook_queue` | webhook notices waiting to be delivered |
+| `buzon_mails_sent_total` | emails sent since the server started |
+| `buzon_send_failures_total` | sends that couldn't go out |
+| `buzon_webhook_deliveries_total{result}` | webhook deliveries: `ok` or `failed` |
+| `buzon_start_time_seconds`, `buzon_info{version}` | when it started and which version it is |
+
+A useful alert: `buzon_accounts{state="error"} > 0`.
 
 ## Logs and troubleshooting
 

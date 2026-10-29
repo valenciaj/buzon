@@ -13,6 +13,7 @@ use serde_json::json;
 use sha2::Sha256;
 use tokio::sync::broadcast::error::RecvError;
 
+use crate::metrics::Counters;
 use crate::AppState;
 
 /// Lo que espera cada envío a que responda el otro lado.
@@ -82,6 +83,8 @@ async fn run(st: Arc<AppState>) {
                     let st = st.clone();
                     set.spawn(async move {
                         let (ok, response, error) = deliver(&st, &d, &w).await;
+                        let c = &st.counters;
+                        Counters::inc(if ok { &c.webhooks_ok } else { &c.webhooks_failed });
                         let a = Attempt {
                             ok,
                             response,

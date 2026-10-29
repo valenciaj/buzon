@@ -22,6 +22,8 @@ pub struct Config {
     pub allow_insecure_mail: bool,
     /// Permite webhooks a la red local (y sin HTTPS). Útil para n8n o Home Assistant en casa.
     pub allow_private_webhooks: bool,
+    /// Token para leer `GET /metrics` (Prometheus/Grafana). Sin él, las métricas están apagadas.
+    pub metrics_token: Option<String>,
     /// Aplicaciones OAuth2 para conectar Gmail y Outlook sin contraseña.
     pub oauth: OAuthConfig,
 }
@@ -53,6 +55,7 @@ impl Default for Config {
             cookie_secure: true,
             allow_insecure_mail: false,
             allow_private_webhooks: false,
+            metrics_token: None,
             oauth: OAuthConfig::default(),
         }
     }

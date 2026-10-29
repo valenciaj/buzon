@@ -930,6 +930,12 @@ async fn sends_replies_through_smtp() {
         !data.contains("Disposition-Notification-To"),
         "sin confirmación si no se pide"
     );
+    let sent = &t.state.counters.mails_sent;
+    assert_eq!(
+        sent.load(std::sync::atomic::Ordering::Relaxed),
+        1,
+        "cuenta para /metrics"
+    );
 
     let thread = t.call("GET", "/api/v1/threads?role=inbox", Some(&cookie), None).await;
     let detail = t
@@ -2218,4 +2224,55 @@ async fn gmail_accounts_connect_with_oauth2_and_refresh_tokens() {
         .call("POST", "/api/v1/oauth/google/start", Some(&tok), Some(json!({})))
         .await;
     assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.body);
+}
+
+#[tokio::test]
+async fn metrics_need_their_token() {
+    let t = app().await;
+    t.setup().await;
+    assert_eq!(
+        t.call("GET", "/metrics", None, None).await.status,
+        StatusCode::NOT_FOUND
+    );
+
+    let dir = tempfile::tempdir().unwrap();
+    let db = AppDb::open(&dir.path().join("app.db")).await.unwrap();
+    let mut state = AppState::new(db, dir.path().to_path_buf(), MasterKey::generate(), true, None);
+    state.metrics_token = Some("secreto-de-grafana".into());
+    let state = Arc::new(state);
+    let t = T {
+        app: buzon_api::app(state.clone(), None),
+        state,
+        dir,
+    };
+    t.setup().await;
+    let get = |auth: Option<&str>| {
+        let mut b = Request::builder().uri("/metrics");
+        if let Some(a) = auth {
+            b = b.header(header::AUTHORIZATION, a);
+        }
+        t.app.clone().oneshot(b.body(Body::empty()).unwrap())
+    };
+    for bad in [None, Some("Bearer otro"), Some("secreto-de-grafana")] {
+        assert_eq!(get(bad).await.unwrap().status(), StatusCode::UNAUTHORIZED, "{bad:?}");
+    }
+    let res = get(Some("Bearer secreto-de-grafana")).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert!(res.headers()[header::CONTENT_TYPE]
+        .to_str()
+        .unwrap()
+        .starts_with("text/plain; version=0.0.4"));
+    let text = String::from_utf8(res.into_body().collect().await.unwrap().to_bytes().to_vec()).unwrap();
+    for line in [
+        "# TYPE buzon_users gauge",
+        "buzon_users 1",
+        "buzon_accounts{state=\"error\"} 0",
+        "buzon_scheduled_sends 0",
+        "buzon_webhook_queue 0",
+        "# TYPE buzon_mails_sent_total counter",
+        "buzon_mails_sent_total 0",
+        "buzon_webhook_deliveries_total{result=\"failed\"} 0",
+    ] {
+        assert!(text.lines().any(|l| l == line), "falta «{line}»:\n{text}");
+    }
 }
