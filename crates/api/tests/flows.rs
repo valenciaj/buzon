@@ -644,9 +644,14 @@ async fn new_accounts_are_checked_against_the_server() {
     let r = t.call("PUT", &url, Some(&cookie), Some(edit.clone())).await;
     assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", r.body);
     edit["verify"] = json!(false);
+    edit["auth_mech"] = json!("cram-md5");
+    let r = t.call("PUT", &url, Some(&cookie), Some(edit.clone())).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.body);
+    edit["auth_mech"] = json!("plain");
     let r = t.call("PUT", &url, Some(&cookie), Some(edit.clone())).await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.body);
     assert_eq!(r.body["name"], "Oficina");
+    assert_eq!(r.body["auth_mech"], "plain");
     assert_eq!(r.body["imap_host"], "127.0.0.2");
     assert!(r.body.get("password").is_none());
     // La identidad sigue a la dirección nueva.

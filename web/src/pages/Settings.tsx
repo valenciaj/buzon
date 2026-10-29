@@ -251,7 +251,7 @@ function EditAccount({ account, onDone }: { account: Account; onDone: (saved: bo
   const [draft, setDraft] = useState<AccountInput>(() => ({
     name: account.name, email: account.email, imap_host: account.imap_host, imap_port: account.imap_port,
     imap_security: account.imap_security, smtp_host: account.smtp_host, smtp_port: account.smtp_port,
-    smtp_security: account.smtp_security, login: account.login, password: '',
+    smtp_security: account.smtp_security, login: account.login, password: '', auth_mech: account.auth_mech,
   }))
   const save = useMutation({
     mutationFn: (verify: boolean) => api.updateAccount(account.id, { ...draft, verify }),

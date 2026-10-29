@@ -112,7 +112,9 @@ pub async fn run(
         prefs::save(&udb, p).await?;
     }
     if let Some(a) = &req.account {
-        let acc = udb.add_account(new_account(a), &st.secrets_for(user.id)).await?;
+        let mut acc = udb.add_account(new_account(a), &st.secrets_for(user.id)).await?;
+        udb.set_account_mech(acc.id, &a.auth_mech).await?;
+        acc.auth_mech = a.auth_mech.clone();
         st.start_account(user.id, &acc).await?;
     }
     st.db.audit(Some(user.id), "setup.completed", None).await?;

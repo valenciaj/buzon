@@ -477,6 +477,7 @@ pub(crate) async fn deliver(
         security: Security::parse(&account.smtp_security).unwrap_or(Security::Tls),
         login: account.login.clone(),
         auth,
+        mech: buzon_sync::Mech::parse(&account.auth_mech).unwrap_or_default(),
     };
     if let Err(e) = send::send(&cfg, &message).await {
         return Err(ApiError::new(StatusCode::BAD_GATEWAY, "smtp_failed", format!("{e}.")));

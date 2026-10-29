@@ -127,6 +127,13 @@
     "updated": "Cambios guardados. Buzón vuelve a sincronizar la cuenta.",
     "passwordKeep": "Déjala vacía para seguir usando la que tienes.",
     "oauthNameOnly": "Es una cuenta de {{provider}}: solo se puede cambiar el nombre.",
+    "authMech": "Autenticación",
+    "authMechs": {
+      "auto": "Automática (recomendada)",
+      "plain": "PLAIN",
+      "login": "LOGIN"
+    },
+    "authMechHint": "Cómo se envía la contraseña al servidor IMAP y SMTP. Si rechaza una contraseña correcta, prueba PLAIN: admite cualquier carácter.",
     "syncedAt": "Última sincronización: {{date}}",
     "oauth": {
       "title": "Conectar sin contraseña",
@@ -253,7 +260,6 @@
   },
   "compose": {
     "new": "Redactar",
-    "newShort": "Redactar",
     "reply": "Respuesta",
     "forward": "Reenvío",
     "replyAction": "Responder",

@@ -1,11 +1,11 @@
 import { useTranslation } from 'react-i18next'
 import { useId } from 'react'
-import type { AccountInput, Security } from '../lib/api'
+import type { AccountInput, AuthMech, Security } from '../lib/api'
 import { Field } from './ui'
 
 export const EMPTY_ACCOUNT: AccountInput = {
   name: '', email: '', imap_host: '', imap_port: 993, imap_security: 'tls',
-  smtp_host: '', smtp_port: 465, smtp_security: 'tls', login: '', password: '',
+  smtp_host: '', smtp_port: 465, smtp_security: 'tls', login: '', password: '', auth_mech: 'auto',
 }
 
 const PORTS: Record<'imap' | 'smtp', Record<Security, number>> = {
@@ -55,6 +55,23 @@ function SecuritySelect({ kind, value, onChange }: {
 
 /** Datos de una cuenta. Al editar (`editing`), la contraseña vacía deja la que había;
  * con `nameOnly` (cuentas de OAuth2) solo se cambia el nombre. */
+function AuthMechSelect({ value, onChange }: { value: AccountInput; onChange: (a: AccountInput) => void }) {
+  const { t } = useTranslation()
+  const id = useId()
+  return (
+    <div className="flex flex-col gap-1.5 sm:col-span-2">
+      <label htmlFor={id} className="label">{t('account.authMech')}</label>
+      <select id={id} className="input" value={value.auth_mech}
+        onChange={(e) => onChange({ ...value, auth_mech: e.target.value as AuthMech })}>
+        {(['auto', 'plain', 'login'] as const).map((m) => (
+          <option key={m} value={m}>{t(`account.authMechs.${m}`)}</option>
+        ))}
+      </select>
+      <p className="text-sm text-muted">{t('account.authMechHint')}</p>
+    </div>
+  )
+}
+
 export function AccountForm({ value, onChange, editing = false, nameOnly = false }: {
   value: AccountInput
   onChange: (a: AccountInput) => void
@@ -89,6 +106,7 @@ export function AccountForm({ value, onChange, editing = false, nameOnly = false
         <Field label={t('account.password')} type="password" autoComplete="new-password" value={value.password} onChange={set('password')}
           required={!editing} hint={editing ? t('account.passwordKeep') : undefined} />
       </div>
+      <AuthMechSelect value={value} onChange={onChange} />
     </div>
   )
 }

@@ -178,6 +178,7 @@ async fn finish(st: &AppState, cu: &CurrentUser, q: CallbackQuery) -> ApiResult<
             security: Security::parse(imap_security).unwrap_or(Security::Tls),
             login: email.clone(),
             auth: Auth::XOAuth2(tokens.access_token.clone()),
+            mech: Default::default(),
         };
         buzon_sync::check(&cfg)
             .await

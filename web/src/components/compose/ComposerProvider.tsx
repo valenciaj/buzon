@@ -67,7 +67,7 @@ export function ComposerProvider({ children }: { children: ReactNode }) {
         const when = new Date(o.sendAt * 1000).toLocaleString(i18n.language, { dateStyle: 'medium', timeStyle: 'short' })
         show({ text: t('compose.scheduledFor', { when }), undo, ms: 8000 })
       } else {
-        show({ text: t('compose.sending', { count: undoSeconds }), undo, ms: undoSeconds * 1000 })
+        show({ text: (left) => (left > 0 ? t('compose.sending', { count: left }) : t('compose.sendingNow')), undo, ms: undoSeconds * 1000 })
         // Pasado el margen, se confirma si salió (o se avisa si volvió a Borradores con error).
         setTimeout(() => confirmSent(id), (undoSeconds + 2) * 1000)
       }

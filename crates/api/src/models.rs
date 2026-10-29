@@ -149,9 +149,17 @@ pub struct AccountInput {
     /// Cifrado SMTP: `tls` (por defecto, puerto 465), `starttls` (587) o `none`.
     #[serde(default = "tls")]
     pub smtp_security: String,
+    /// Cómo se manda la contraseña: `auto` (por defecto), `plain` (AUTHENTICATE PLAIN / AUTH PLAIN)
+    /// o `login` (LOGIN / AUTH LOGIN).
+    #[serde(default = "auto")]
+    pub auth_mech: String,
     /// Comprobar antes de guardar que el servidor IMAP acepta el usuario y la contraseña.
     #[serde(default = "yes")]
     pub verify: bool,
+}
+
+fn auto() -> String {
+    "auto".into()
 }
 
 fn tls() -> String {
@@ -177,6 +185,8 @@ pub struct AccountOut {
     pub smtp_security: String,
     /// Cómo se entra: `password`, o con OAuth2 `google` o `microsoft`.
     pub auth: String,
+    /// Con contraseña, cómo se manda: `auto`, `plain` o `login`.
+    pub auth_mech: String,
     /// Estado de la sincronización: `off`, `connecting`, `syncing`, `idle` o `error`.
     pub state: String,
     /// Última sincronización completa (segundos Unix).
@@ -203,6 +213,7 @@ impl AccountOut {
             imap_security: a.imap_security,
             smtp_security: a.smtp_security,
             auth: a.auth,
+            auth_mech: a.auth_mech,
             state,
             synced_at: a.synced_at,
             sync_error: a.sync_error,

@@ -486,11 +486,17 @@ function Mail({ me }: { me: Me }) {
           onLabel={(add, remove) => thread && mail.label([thread], add, remove)}
           onFlow={(change) => thread && flowIds(change, [thread])} focus={focus} />
       </main>
-      <button className="fixed bottom-4 right-4 z-10 hidden size-9 place-items-center rounded-full border border-line bg-surface text-muted shadow hover:text-fg lg:grid"
+      {list.length > 0 && (
+        <button className="btn btn-primary fixed bottom-4 right-4 z-10 hidden size-11 rounded-full px-0 shadow-lg lg:inline-flex"
+          title={t('compose.new')} aria-label={t('compose.new')} onClick={newMessage}>
+          <Icon name="compose" />
+        </button>
+      )}
+      <button className={`fixed bottom-5 ${list.length > 0 ? 'right-18' : 'right-4'} z-10 hidden size-9 place-items-center rounded-full border border-line bg-surface text-muted shadow hover:text-fg lg:grid`}
         title={t('shortcuts.open')} aria-label={t('shortcuts.open')} onClick={() => setHelp(true)}>
         <Icon name="keyboard" />
       </button>
-      <button className="fixed bottom-4 right-16 z-10 hidden size-9 place-items-center rounded-full border border-line bg-surface text-muted shadow hover:text-fg lg:grid"
+      <button className={`fixed bottom-5 ${list.length > 0 ? 'right-30' : 'right-16'} z-10 hidden size-9 place-items-center rounded-full border border-line bg-surface text-muted shadow hover:text-fg lg:grid`}
         title={`${t('palette.title')} (Ctrl+K)`} aria-label={t('palette.title')} onClick={() => setPalette(true)}>
         <Icon name="command" />
       </button>

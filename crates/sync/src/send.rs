@@ -9,7 +9,7 @@ use lettre::message::{Attachment, Mailbox, MultiPart, SinglePart};
 use lettre::transport::smtp::authentication::{Credentials, Mechanism};
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 
-use crate::{Auth, Security};
+use crate::{Auth, Mech, Security};
 
 const TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -30,6 +30,7 @@ pub struct SmtpConfig {
     pub security: Security,
     pub login: String,
     pub auth: Auth,
+    pub mech: Mech,
 }
 
 /// Un adjunto ya leído.
@@ -159,7 +160,14 @@ pub async fn send(cfg: &SmtpConfig, msg: &Message) -> Result<(), SendError> {
         Security::None => AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&cfg.host),
     };
     let builder = match &cfg.auth {
-        Auth::Password(p) => builder.credentials(Credentials::new(cfg.login.clone(), p.clone())),
+        Auth::Password(p) => {
+            let b = builder.credentials(Credentials::new(cfg.login.clone(), p.clone()));
+            match cfg.mech {
+                Mech::Auto => b,
+                Mech::Plain => b.authentication(vec![Mechanism::Plain]),
+                Mech::Login => b.authentication(vec![Mechanism::Login]),
+            }
+        }
         Auth::XOAuth2(token) => builder
             .credentials(Credentials::new(cfg.login.clone(), token.clone()))
             .authentication(vec![Mechanism::Xoauth2]),

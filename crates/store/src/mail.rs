@@ -481,7 +481,7 @@ impl UserDb {
                         .await?;
                     // También las pilas, lo pospuesto y la nota.
                     sqlx::query(
-                        "UPDATE threads SET last_date = MAX(last_date, o.last_date), \
+                        "UPDATE threads SET last_date = MAX(threads.last_date, o.last_date), \
                          reply_later = COALESCE(threads.reply_later, o.reply_later), aside = COALESCE(threads.aside, o.aside), \
                          snooze_until = COALESCE(threads.snooze_until, o.snooze_until), \
                          note = CASE WHEN threads.note = '' THEN o.note WHEN o.note = '' THEN threads.note \
@@ -982,6 +982,34 @@ mod tests {
         assert_eq!(t.iter().find(|x| x.id == t1).unwrap().last_date, 200);
         db.delete_messages(&ids[..2]).await.unwrap();
         assert!(db.thread(t1).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_message_that_links_two_threads_merges_them() {
+        let (_d, db, acc) = db_with_account().await;
+        let inbox = db.upsert_mailbox(acc, "INBOX", None, Some("inbox")).await.unwrap();
+        let tx = db
+            .insert_message(&msg(acc, inbox.id, 1, "x@x", None, 100))
+            .await
+            .unwrap();
+        let ty = db
+            .insert_message(&msg(acc, inbox.id, 2, "y@x", None, 300))
+            .await
+            .unwrap();
+        assert_ne!(tx, ty);
+        // Responde a uno y cita al otro en References: los dos hilos pasan a ser uno.
+        let mut both = msg(acc, inbox.id, 3, "z@x", Some("x@x"), 200);
+        both.refs = vec!["y@x".into(), "x@x".into()];
+        let t = db.insert_message(&both).await.unwrap();
+        let page = db
+            .threads(&ThreadQuery {
+                limit: 10,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(page.len(), 1, "{page:?}");
+        assert_eq!((page[0].id, page[0].messages, page[0].last_date), (t, 3, 300));
     }
 
     #[tokio::test]

@@ -82,13 +82,17 @@ export function Sidebar({ me, accounts, mailboxes, account, box, onAccount, onBo
 
   return (
     <nav className="flex h-full flex-col gap-5 overflow-y-auto p-4" aria-label={t('home.menu')}>
-      <Logo />
-      {onCompose && (
-        <button className="btn btn-primary w-full" onClick={onCompose}>
-          <Icon name="compose" /> {t('compose.new')}
-        </button>
-      )}
-      {accounts.length > 0 && (
+      <div className="flex items-center justify-between gap-2">
+        <Logo />
+        {onCompose && (
+          <button className="btn btn-primary size-10 rounded-full px-0" onClick={onCompose}
+            title={t('compose.new')} aria-label={t('compose.new')}>
+            <Icon name="compose" />
+          </button>
+        )}
+      </div>
+      {/* En la vista unificada no hace falta elegir cuenta (se cambia en Ajustes › Apariencia). */}
+      {accounts.length > 0 && me.preferences.view !== 'unified' && (
         <div className="flex flex-col gap-2">
           <p className="eyebrow">{t('home.accounts')}</p>
           <div className="flex flex-wrap gap-1.5">

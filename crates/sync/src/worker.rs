@@ -92,16 +92,39 @@ pub(crate) async fn run(ctx: Ctx, mut rx: mpsc::UnboundedReceiver<Cmd>) {
             });
         }
         ctx.state(State::Error);
-        tokio::select! {
-            _ = tokio::time::sleep(retry) => {}
-            cmd = rx.recv() => match cmd {
+        // Con la contraseña mal no se reintenta solo: cada intento fallido cuenta en el
+        // servidor, que puede acabar bloqueando la cuenta o la IP. Se espera a que el
+        // usuario la cambie (eso reinicia la cuenta) o pulse «Sincronizar ahora».
+        let wait = if rejected(&err) { None } else { Some(retry) };
+        loop {
+            let cmd = match wait {
+                Some(d) => match tokio::time::timeout(d, rx.recv()).await {
+                    Ok(cmd) => cmd,
+                    Err(_) => break,
+                },
+                None => rx.recv().await,
+            };
+            match cmd {
                 None | Some(Cmd::Stop) => return,
-                Some(Cmd::SyncNow) => {}
-                Some(c) => pending.push(c),
+                Some(Cmd::SyncNow) => break,
+                Some(c) => {
+                    pending.push(c);
+                    if wait.is_some() {
+                        break;
+                    }
+                }
             }
         }
         retry = (retry * 2).min(MAX_RETRY);
     }
+}
+
+/// El servidor (o el proveedor de OAuth2) ha rechazado las credenciales.
+fn rejected(e: &crate::Error) -> bool {
+    matches!(
+        e,
+        crate::Error::Login(_) | crate::Error::OAuth(crate::OAuthError::Revoked)
+    )
 }
 
 async fn session(

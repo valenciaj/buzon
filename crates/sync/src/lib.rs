@@ -20,7 +20,7 @@ pub mod parse;
 pub mod send;
 mod worker;
 
-pub use conn::{check, Auth, Security, ServerConfig};
+pub use conn::{check, Auth, Mech, Security, ServerConfig};
 pub use oauth::{OAuthApp, OAuthError, Provider};
 
 #[derive(Debug, thiserror::Error)]
@@ -235,6 +235,7 @@ impl SyncHub {
                 security,
                 login: account.login.clone(),
                 auth: Auth::Password(String::new()),
+                mech: Mech::parse(&account.auth_mech).unwrap_or_default(),
             },
             creds,
             raw_dir: user_raw_dir(&self.data_dir, user),
