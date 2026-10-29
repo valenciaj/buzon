@@ -321,7 +321,9 @@
     "followUpDays_one": "In {{count}} day",
     "followUpDays_other": "In {{count}} days",
     "followUpOff": "Don't remind me",
-    "sendFailed": "Not sent: {{error}}"
+    "sendFailed": "Not sent: {{error}}",
+    "hideCc": "Remove Cc",
+    "hideBcc": "Remove Bcc"
   },
   "identity": {
     "intro": "The addresses you write from: each account's own and its aliases. Each one can have its own signature.",

@@ -80,7 +80,7 @@ export function RecipientField({ label, value, onChange, autoFocus, children }: 
       <input id={id} value={typed} autoFocus={autoFocus} autoComplete="off" spellCheck={false}
         aria-invalid={bad} aria-autocomplete="list" aria-expanded={suggestions.length > 0}
         aria-controls={`${id}-list`} role="combobox"
-        className={`min-h-9 min-w-[8rem] flex-1 bg-transparent py-1 outline-none ${bad ? 'text-crit' : ''}`}
+        className={`min-h-9 min-w-[8rem] flex-1 bg-transparent px-2 py-1 outline-none ${bad ? 'text-crit' : ''}`}
         onChange={(e) => { setTyped(e.target.value); setBad(false); setActive(0) }}
         onKeyDown={onKey}
         onBlur={() => typed.trim() && commit()}

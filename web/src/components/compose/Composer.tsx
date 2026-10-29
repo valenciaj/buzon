@@ -208,6 +208,13 @@ export function Composer({ initial, error, onClose, onSend }: {
     else editor.chain().focus().extendMarkRange('link').setLink({ href: url.trim() }).run()
   }
 
+  /** Botón para plegar Cc o Cco; se lleva sus destinatarios, que están a la vista. */
+  const hideField = (label: string, hide: () => void) => (
+    <button type="button" className="ml-auto grid size-8 place-items-center rounded-full text-muted hover:bg-surface-2 hover:text-fg"
+      aria-label={label} title={label} onClick={hide}>
+      <Icon name="close" className="size-4" />
+    </button>
+  )
   return (
     <div role="dialog" aria-modal="false" aria-label={title} onKeyDown={onKey}
       onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDragging(true) } }}
@@ -239,8 +246,16 @@ export function Composer({ initial, error, onClose, onSend }: {
           {!showBcc && <button type="button" className="rounded px-1.5 py-1 text-muted hover:text-fg" onClick={() => setShowBcc(true)}>{t('compose.bcc')}</button>}
         </span>
       </RecipientField>
-      {showCc && <RecipientField label={t('compose.cc')} value={state.cc} onChange={(cc) => change({ cc })} />}
-      {showBcc && <RecipientField label={t('compose.bcc')} value={state.bcc} onChange={(bcc) => change({ bcc })} />}
+      {showCc && (
+        <RecipientField label={t('compose.cc')} value={state.cc} onChange={(cc) => change({ cc })} autoFocus={!initial.cc.length}>
+          {hideField(t('compose.hideCc'), () => { setShowCc(false); if (state.cc.length) change({ cc: [] }) })}
+        </RecipientField>
+      )}
+      {showBcc && (
+        <RecipientField label={t('compose.bcc')} value={state.bcc} onChange={(bcc) => change({ bcc })} autoFocus={!initial.bcc.length}>
+          {hideField(t('compose.hideBcc'), () => { setShowBcc(false); if (state.bcc.length) change({ bcc: [] }) })}
+        </RecipientField>
+      )}
       <input aria-label={t('compose.subject')} placeholder={t('compose.subject')} value={state.subject}
         autoFocus={initial.to.length > 0 && !initial.subject.trim()}
         onChange={(e) => change({ subject: e.target.value })}

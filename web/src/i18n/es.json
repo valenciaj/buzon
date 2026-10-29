@@ -321,7 +321,9 @@
     "followUpDays_one": "En {{count}} día",
     "followUpDays_other": "En {{count}} días",
     "followUpOff": "No avisar",
-    "sendFailed": "No salió: {{error}}"
+    "sendFailed": "No salió: {{error}}",
+    "hideCc": "Quitar Cc",
+    "hideBcc": "Quitar Cco"
   },
   "identity": {
     "intro": "Las direcciones desde las que escribes: la de cada cuenta y sus alias. Cada una puede tener su firma.",
