@@ -123,7 +123,7 @@ async fn open(cfg: &ServerConfig) -> Result<Session> {
         Auth::Password(p) => client
             .login(&cfg.login, p)
             .await
-            .map_err(|(e, _)| Error::Login(e.to_string())),
+            .map_err(|(e, _)| Error::Login(login_error(&e))),
         Auth::XOAuth2(token) => {
             let a = XOAuth2 {
                 data: oauth::xoauth2(&cfg.login, token),
@@ -132,7 +132,7 @@ async fn open(cfg: &ServerConfig) -> Result<Session> {
             client
                 .authenticate("XOAUTH2", a)
                 .await
-                .map_err(|(e, _)| Error::Login(e.to_string()))
+                .map_err(|(e, _)| Error::Login(login_error(&e)))
         }
     }
 }
@@ -149,4 +149,44 @@ pub async fn check(cfg: &ServerConfig) -> Result<()> {
     let mut s = connect(cfg).await?;
     let _ = s.logout().await;
     Ok(())
+}
+
+/// Lo que dijo el servidor al rechazar la entrada, sin el envoltorio de async-imap:
+/// `code: None, info: Some("[AUTHENTICATIONFAILED] LOGIN failed")` → `LOGIN failed`.
+fn login_error(e: &async_imap::error::Error) -> String {
+    let raw = match e {
+        async_imap::error::Error::No(s) | async_imap::error::Error::Bad(s) => s.clone(),
+        other => return other.to_string(),
+    };
+    let info = raw
+        .split_once("info: Some(\"")
+        .and_then(|(_, rest)| rest.rsplit_once("\")"))
+        .map(|(text, _)| text.replace("\\\"", "\""))
+        .unwrap_or(raw);
+    let text = match info.trim().strip_prefix('[') {
+        Some(rest) => rest.split_once(']').map_or(rest, |(_, t)| t).trim().to_string(),
+        None => info.trim().to_string(),
+    };
+    if text.is_empty() {
+        "acceso denegado".into()
+    } else {
+        text
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn login_errors_show_only_the_servers_words() {
+        let no = |s: &str| async_imap::error::Error::No(s.into());
+        assert_eq!(
+            login_error(&no(
+                "code: None, info: Some(\"[AUTHENTICATIONFAILED] LOGIN login failed\")"
+            )),
+            "LOGIN login failed"
+        );
+        assert_eq!(login_error(&no("credenciales no válidas")), "credenciales no válidas");
+    }
 }

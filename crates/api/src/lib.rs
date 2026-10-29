@@ -244,7 +244,7 @@ impl AppState {
         setup::status, setup::run,
         auth::login, auth::logout,
         me::get, me::update_preferences, me::totp_setup, me::totp_enable, me::totp_disable,
-        accounts::list, accounts::create, accounts::remove, accounts::sync,
+        accounts::list, accounts::create, accounts::update, accounts::remove, accounts::sync,
         oauth::providers, oauth::start, oauth::callback,
         mail::mailboxes, mail::threads, mail::thread, mail::update_thread, mail::attachment, mail::events,
         compose::identities, compose::create_identity, compose::update_identity, compose::delete_identity,
@@ -358,7 +358,7 @@ pub fn api_router(state: Arc<AppState>) -> Router {
         .route("/me/totp/enable", post(me::totp_enable))
         .route("/me/totp/disable", post(me::totp_disable))
         .route("/accounts", get(accounts::list).post(accounts::create))
-        .route("/accounts/{id}", delete(accounts::remove))
+        .route("/accounts/{id}", put(accounts::update).delete(accounts::remove))
         .route("/accounts/{id}/sync", post(accounts::sync))
         .route("/oauth/providers", get(oauth::providers))
         .route("/oauth/{provider}/start", post(oauth::start))

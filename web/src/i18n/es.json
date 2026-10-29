@@ -122,6 +122,11 @@
       "idle": "Al día",
       "error": "Error"
     },
+    "edit": "Editar",
+    "saveChanges": "Guardar cambios",
+    "updated": "Cambios guardados. Buzón vuelve a sincronizar la cuenta.",
+    "passwordKeep": "Déjala vacía para seguir usando la que tienes.",
+    "oauthNameOnly": "Es una cuenta de {{provider}}: solo se puede cambiar el nombre.",
     "syncedAt": "Última sincronización: {{date}}",
     "oauth": {
       "title": "Conectar sin contraseña",

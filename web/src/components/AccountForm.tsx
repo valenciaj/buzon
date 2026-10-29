@@ -53,10 +53,20 @@ function SecuritySelect({ kind, value, onChange }: {
   )
 }
 
-export function AccountForm({ value, onChange }: { value: AccountInput; onChange: (a: AccountInput) => void }) {
+/** Datos de una cuenta. Al editar (`editing`), la contraseña vacía deja la que había;
+ * con `nameOnly` (cuentas de OAuth2) solo se cambia el nombre. */
+export function AccountForm({ value, onChange, editing = false, nameOnly = false }: {
+  value: AccountInput
+  onChange: (a: AccountInput) => void
+  editing?: boolean
+  nameOnly?: boolean
+}) {
   const { t } = useTranslation()
   const set = (k: keyof AccountInput) => (e: React.ChangeEvent<HTMLInputElement>) =>
     onChange({ ...value, [k]: e.target.type === 'number' ? Number(e.target.value) : e.target.value })
+  if (nameOnly) {
+    return <Field label={t('account.name')} placeholder={t('account.namePlaceholder')} value={value.name} onChange={set('name')} required />
+  }
   return (
     <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_7rem]">
       <div className="sm:col-span-2">
@@ -64,7 +74,7 @@ export function AccountForm({ value, onChange }: { value: AccountInput; onChange
       </div>
       <div className="sm:col-span-2">
         <Field label={t('account.email')} type="email" autoComplete="off" value={value.email}
-          onChange={(e) => onChange(guessFromEmail(value, e.target.value))} required />
+          onChange={(e) => onChange(editing ? { ...value, email: e.target.value } : guessFromEmail(value, e.target.value))} required />
       </div>
       <Field label={t('account.imapHost')} value={value.imap_host} onChange={set('imap_host')} required />
       <Field label={t('account.imapPort')} type="number" min={1} max={65535} value={value.imap_port} onChange={set('imap_port')} required />
@@ -76,7 +86,8 @@ export function AccountForm({ value, onChange }: { value: AccountInput; onChange
         <Field label={t('account.login')} autoComplete="off" value={value.login} onChange={set('login')} required />
       </div>
       <div className="sm:col-span-2">
-        <Field label={t('account.password')} type="password" autoComplete="new-password" value={value.password} onChange={set('password')} required />
+        <Field label={t('account.password')} type="password" autoComplete="new-password" value={value.password} onChange={set('password')}
+          required={!editing} hint={editing ? t('account.passwordKeep') : undefined} />
       </div>
     </div>
   )

@@ -197,6 +197,30 @@ impl UserDb {
     }
 
     /// Cambia el secreto guardado: contraseña o token de renovación.
+    /// Cambia los datos de una cuenta. Con `password` vacía se queda la que había; `auth` no cambia.
+    pub async fn update_account(&self, id: Id, a: NewAccount<'_>, secrets: &SecretBox) -> Result<()> {
+        sqlx::query(
+            "UPDATE accounts SET name = ?, email = ?, imap_host = ?, imap_port = ?, smtp_host = ?, smtp_port = ?, \
+             login = ?, imap_security = ?, smtp_security = ?, sync_error = NULL WHERE id = ?",
+        )
+        .bind(a.name)
+        .bind(a.email)
+        .bind(a.imap_host)
+        .bind(a.imap_port)
+        .bind(a.smtp_host)
+        .bind(a.smtp_port)
+        .bind(a.login)
+        .bind(a.imap_security)
+        .bind(a.smtp_security)
+        .bind(id.as_bytes().as_slice())
+        .execute(&self.pool)
+        .await?;
+        if !a.password.is_empty() {
+            self.set_account_secret(id, a.password, secrets).await?;
+        }
+        Ok(())
+    }
+
     pub async fn set_account_secret(&self, id: Id, plain: &str, secrets: &SecretBox) -> Result<()> {
         sqlx::query("UPDATE accounts SET secret = ? WHERE id = ?")
             .bind(secrets.seal(plain.as_bytes())?)

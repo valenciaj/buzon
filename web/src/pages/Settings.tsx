@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { Link, NavLink, useParams, useSearchParams } from 'react-router'
-import { api, ApiError, type AccountInput, type OAuthProvider, type Identity, type IdentityInput, type Language, type Me, type Preferences } from '../lib/api'
+import { api, ApiError, type Account, type AccountInput, type OAuthProvider, type Identity, type IdentityInput, type Language, type Me, type Preferences } from '../lib/api'
 import { applyLook } from '../lib/look'
 import { useSetMe } from '../lib/session'
 import { setLanguage } from '../i18n'
@@ -155,6 +155,8 @@ function AccountsTab() {
     },
   })
   const remove = useMutation({ mutationFn: api.deleteAccount, onSuccess: refresh })
+  // Cuenta abierta para editar (o recién guardada, para mostrar el aviso).
+  const [editing, setEditing] = useState<{ id: string; saved: boolean } | null>(null)
   const sync = useMutation({ mutationFn: api.syncAccount, onSuccess: refresh })
   const providers = useQuery({ queryKey: ['oauth-providers'], queryFn: api.oauthProviders })
   // Gmail y Outlook: se va al proveedor y se vuelve aquí con ?oauth=ok o ?oauth_error=.
@@ -174,7 +176,11 @@ function AccountsTab() {
     <section className="flex flex-col gap-6">
       {accounts.data && accounts.data.length > 0 && (
         <ul className="card divide-y divide-line">
-          {accounts.data.map((a) => (
+          {accounts.data.map((a) => editing?.id === a.id && !editing.saved ? (
+            <li key={a.id} className="px-4 py-3">
+              <EditAccount account={a} onDone={(saved) => { setEditing(saved ? { id: a.id, saved: true } : null); if (saved) refresh() }} />
+            </li>
+          ) : (
             <li key={a.id} className="flex flex-col gap-2 px-4 py-3">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <span className="font-semibold">{a.name}</span>
@@ -186,8 +192,10 @@ function AccountsTab() {
               <span className="text-sm text-muted [overflow-wrap:anywhere]">{a.email} · {a.imap_host}:{a.imap_port}</span>
               {a.synced_at && <span className="text-sm text-muted">{t('account.syncedAt', { date: date(a.synced_at) })}</span>}
               {a.state === 'error' && a.sync_error && <Alert>{a.sync_error}</Alert>}
+              {editing?.id === a.id && editing.saved && <Alert kind="ok">{t('account.updated')}</Alert>}
               <div className="flex flex-wrap gap-2">
                 <button className="btn" disabled={sync.isPending} onClick={() => sync.mutate(a.id)}>{t('account.syncNow')}</button>
+                <button className="btn" onClick={() => setEditing({ id: a.id, saved: false })}>{t('account.edit')}</button>
                 {a.auth !== 'password' && a.state === 'error' && (
                   <button className="btn" disabled={connect.isPending} onClick={() => connect.mutate({ provider: a.auth as OAuthProvider, hint: a.email })}>
                     {t('account.oauth.reconnect')}
@@ -234,6 +242,39 @@ function AccountsTab() {
         </div>
       </form>
     </section>
+  )
+}
+
+function EditAccount({ account, onDone }: { account: Account; onDone: (saved: boolean) => void }) {
+  const { t } = useTranslation()
+  const oauth = account.auth !== 'password'
+  const [draft, setDraft] = useState<AccountInput>(() => ({
+    name: account.name, email: account.email, imap_host: account.imap_host, imap_port: account.imap_port,
+    imap_security: account.imap_security, smtp_host: account.smtp_host, smtp_port: account.smtp_port,
+    smtp_security: account.smtp_security, login: account.login, password: '',
+  }))
+  const save = useMutation({
+    mutationFn: (verify: boolean) => api.updateAccount(account.id, { ...draft, verify }),
+    onSuccess: () => onDone(true),
+  })
+  const loginFailed = save.error instanceof ApiError && save.error.code === 'mail_login_failed'
+  return (
+    <form className="flex flex-col gap-5" onSubmit={(e) => { e.preventDefault(); save.mutate(true) }}>
+      <h2 className="text-lg font-bold">{t('account.edit')} · {account.name}</h2>
+      {oauth && <p className="text-muted">{t('account.oauthNameOnly', { provider: t(`account.oauth.${account.auth}`) })}</p>}
+      <AccountForm value={draft} onChange={(a) => { setDraft(a); save.reset() }} editing nameOnly={oauth} />
+      {save.isPending && !oauth && <Alert kind="info">{t('account.checking')}</Alert>}
+      {save.isError && <Alert>{save.error instanceof ApiError ? save.error.message : t('common.error')}</Alert>}
+      <div className="flex flex-wrap gap-2">
+        <button className="btn btn-primary" disabled={save.isPending}>{t('account.saveChanges')}</button>
+        {loginFailed && (
+          <button type="button" className="btn" disabled={save.isPending} onClick={() => save.mutate(false)}>
+            {t('account.saveAnyway')}
+          </button>
+        )}
+        <button type="button" className="btn btn-ghost" onClick={() => onDone(false)}>{t('common.cancel')}</button>
+      </div>
+    </form>
   )
 }
 

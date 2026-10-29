@@ -23,6 +23,7 @@ Activa o desactiva la [verificación en dos pasos](./primeros-pasos#verificacion
 Aquí ves el estado de cada cuenta (al día, sincronizando, error) y la última sincronización. Puedes:
 
 - **Sincronizar ahora**, sin esperar a la siguiente vuelta.
+- **Editar** sus datos: servidores, puertos, usuario o contraseña (si dejas la contraseña vacía, se queda la que había). Antes de guardar se comprueba con el servidor. En las cuentas de Gmail y Outlook solo se cambia el nombre.
 - **Conectar con Google o Microsoft** (si el administrador lo ha activado), sin contraseña. Si un día retiras el permiso o caduca, pulsa **Volver a conectar**.
 - **Añadir una cuenta** con servidor IMAP y SMTP. Usa siempre TLS o STARTTLS.
 - **Eliminar** una cuenta de Buzón. Se borra el correo guardado en Buzón, no el de tu servidor.
