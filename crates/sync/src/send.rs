@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use buzon_store::mail::Addr;
+use lettre::address::Envelope;
 use lettre::message::header::ContentType;
 use lettre::message::{Attachment, Mailbox, MultiPart, SinglePart};
 use lettre::transport::smtp::authentication::{Credentials, Mechanism};
@@ -62,6 +63,43 @@ fn mailbox(a: &Addr) -> Result<Mailbox, SendError> {
 
 /// Construye el mensaje. Devuelve también su `Message-ID` (sin `<>`).
 pub fn build(o: &Outgoing) -> Result<(Message, String), SendError> {
+    build_with(o, None)
+}
+
+/// Cabecera con la que Buzón reconoce sus borradores en la carpeta Borradores del servidor.
+pub const DRAFT_HEADER: &str = "X-Buzon-Draft";
+
+/// El borrador `key` como mensaje para guardarlo en la carpeta Borradores. Puede no tener
+/// destinatarios todavía.
+pub fn build_draft(o: &Outgoing, key: &str) -> Result<Vec<u8>, SendError> {
+    let from = mailbox(&o.from)?;
+    let envelope =
+        Envelope::new(Some(from.email.clone()), vec![from.email]).map_err(|e| SendError::Build(e.to_string()))?;
+    let (msg, _) = build_with(o, Some(envelope))?;
+    let mut raw = format!("{DRAFT_HEADER}: {key}\r\n").into_bytes();
+    // lettre quita la copia oculta de las cabeceras; en un borrador hay que conservarla.
+    if !o.bcc.is_empty() {
+        let bcc: Vec<String> = o
+            .bcc
+            .iter()
+            .map(|a| mailbox(a).map(|m| m.email.to_string()))
+            .collect::<Result<_, _>>()?;
+        raw.extend(format!("Bcc: {}\r\n", bcc.join(", ")).into_bytes());
+    }
+    raw.extend(msg.formatted());
+    Ok(raw)
+}
+
+/// Si un mensaje es una copia de un borrador de Buzón (mira solo las cabeceras).
+pub fn is_draft_copy(raw: &[u8]) -> bool {
+    let end = raw.windows(4).position(|w| w == b"\r\n\r\n").unwrap_or(raw.len());
+    let name = DRAFT_HEADER.as_bytes();
+    raw[..end].split(|b| *b == b'\n').any(|line| {
+        line.len() > name.len() && line[..name.len()].eq_ignore_ascii_case(name) && line[name.len()] == b':'
+    })
+}
+
+fn build_with(o: &Outgoing, envelope: Option<Envelope>) -> Result<(Message, String), SendError> {
     let from = mailbox(&o.from)?;
     let domain = from.email.domain().to_string();
     let message_id = format!("{}@{domain}", buzon_store::Id::new());
@@ -71,6 +109,9 @@ pub fn build(o: &Outgoing) -> Result<(Message, String), SendError> {
         .message_id(Some(format!("<{message_id}>")))
         .date_now()
         .user_agent(format!("Buzón {}", env!("CARGO_PKG_VERSION")));
+    if let Some(e) = envelope {
+        b = b.envelope(e);
+    }
     for a in &o.to {
         b = b.to(mailbox(a)?);
     }
@@ -211,5 +252,33 @@ mod tests {
         assert!(matches!(err, Err(SendError::Address(_))));
         assert!(server_saves_sent("smtp.gmail.com"));
         assert!(!server_saves_sent("smtp.ejemplo.es"));
+    }
+
+    #[test]
+    fn drafts_carry_their_key_and_may_lack_recipients() {
+        let mut o = Outgoing {
+            from: addr(Some("Javier"), "yo@ejemplo.es"),
+            to: vec![],
+            cc: vec![],
+            bcc: vec![addr(None, "oculto@ejemplo.es")],
+            subject: "A medias".into(),
+            text: "Hola".into(),
+            html: None,
+            in_reply_to: None,
+            references: vec![],
+            attachments: vec![],
+        };
+        let raw = build_draft(&o, "abc123").unwrap();
+        let text = String::from_utf8(raw.clone()).unwrap();
+        assert!(
+            text.starts_with("X-Buzon-Draft: abc123\r\nBcc: oculto@ejemplo.es\r\n"),
+            "{text}"
+        );
+        assert!(text.contains("Subject: A medias"));
+        assert!(is_draft_copy(&raw));
+        assert!(is_draft_copy(b"Subject: x\r\nx-buzon-draft: abc\r\n\r\nhola"));
+        assert!(!is_draft_copy(b"Subject: x\r\n\r\nX-Buzon-Draft: en el cuerpo"));
+        o.bcc.clear();
+        assert!(build_draft(&o, "k").is_ok());
     }
 }

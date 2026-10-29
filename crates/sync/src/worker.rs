@@ -259,6 +259,16 @@ async fn apply(s: &mut Session, cmd: Cmd, caps: Caps) -> Result<()> {
             let _: Vec<Fetch> = s.uid_store(&set, &query).await?.try_collect().await?;
         }
         Cmd::Append { mailbox, raw } => s.append(&mailbox, Some("(\\Seen)"), None, &raw).await?,
+        Cmd::PutDraft { mailbox, key, raw } => {
+            s.select(&mailbox).await?;
+            let old = search(s, &format!("HEADER {} \"{key}\"", crate::send::DRAFT_HEADER)).await?;
+            if let Some(raw) = raw {
+                s.append(&mailbox, Some("(\\Seen \\Draft)"), None, &raw).await?;
+            }
+            if !old.is_empty() {
+                expunge(s, &uid_set(&old), caps).await?;
+            }
+        }
         Cmd::Move { from, to, uids } => imap_move(s, &from, &to, &uids, caps).await?,
         Cmd::Expunge { mailbox, uids } => {
             s.select(&mailbox).await?;
@@ -580,6 +590,10 @@ async fn fetch_batch(
         let (Some(uid), Some(raw)) = (f.uid, f.body()) else {
             continue;
         };
+        // Las copias de nuestros borradores ya están en la lista de borradores de Buzón.
+        if mb.role.as_deref() == Some("drafts") && crate::send::is_draft_copy(raw) {
+            continue;
+        }
         let id = Id::new();
         let env = Envelope {
             id,

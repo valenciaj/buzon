@@ -10,7 +10,7 @@ Click **Compose** (or <kbd>c</kbd>). A window opens with:
 
 ![Composing an email](/img/en/redactar.png)
 
-While you write, Buzón saves the **draft** automatically. If you close the window, you'll find it in **Drafts**.
+While you write, Buzón saves the **draft** automatically. If you close the window, you'll find it in **Drafts**. A copy is also saved to the Drafts folder on your mail server (a few seconds after you stop typing), so you can carry on from your phone or another app.
 
 ## Attachments
 

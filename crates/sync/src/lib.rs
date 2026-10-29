@@ -89,6 +89,12 @@ pub(crate) enum Cmd {
         mailbox: String,
         raw: Vec<u8>,
     },
+    /// Cambia (o borra, sin `raw`) la copia de un borrador en la carpeta Borradores.
+    PutDraft {
+        mailbox: String,
+        key: String,
+        raw: Option<Vec<u8>>,
+    },
     Move {
         from: String,
         to: String,
@@ -287,6 +293,19 @@ impl SyncHub {
             },
         );
         self.send(account, Cmd::SyncNow);
+    }
+
+    /// Deja en la carpeta Borradores del servidor la última versión del borrador `key`
+    /// (de `send::build_draft`), o la borra si `raw` es `None`.
+    pub fn put_draft(&self, account: Id, mailbox: &str, key: &str, raw: Option<Vec<u8>>) {
+        self.send(
+            account,
+            Cmd::PutDraft {
+                mailbox: mailbox.to_string(),
+                key: key.to_string(),
+                raw,
+            },
+        );
     }
 
     /// Aplica en IMAP movimientos ya hechos en local y vuelve a sincronizar para
