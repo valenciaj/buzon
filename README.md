@@ -4,7 +4,8 @@ Webmail autoalojado: backend en Rust, frontend en React y SQLite (una base de da
 
 - Plan completo: [docs/PLAN.md](docs/PLAN.md)
 - Prototipo visual (fase 0): [prototype/](prototype/)
-- Despliegue con systemd + nginx: [deploy/](deploy/)
+- Manual de usuario y de administración (ES/EN): [docs/manual/](docs/manual/), servido en `/manual` (también en PDF)
+- Instalar en un servidor (systemd + nginx + Let's Encrypt, copias diarias): [docs/manual/administracion.md](docs/manual/administracion.md)
 
 ## Estructura
 
@@ -15,7 +16,8 @@ Webmail autoalojado: backend en Rust, frontend en React y SQLite (una base de da
 | `crates/api` | API HTTP (`/api/v1`), OpenAPI y visor público en `/api/docs` |
 | `crates/buzon` | Binario del servidor y su configuración |
 | `web` | Frontend React + TypeScript (Vite, Tailwind), en español e inglés |
-| `deploy` | Configuración de ejemplo, unidad systemd y sitio nginx |
+| `deploy` | Configuración de ejemplo, systemd (servicio y copia diaria), nginx, `build.sh` e `install.sh` |
+| `docs/manual` | Manual con VitePress, PDF y capturas automáticas (`demo/run.sh`) |
 
 ## Desarrollo
 
@@ -30,6 +32,10 @@ cd web && npm install && npm run dev
 ```
 
 La primera vez, Buzón abre el asistente de configuración. La documentación de la API está en `/api/docs`.
+
+Manual: `cd docs/manual && npm install && npm run dev`. Para servirlo desde Buzón en `/manual`, compílalo después de la web (`npm run build`; `npm run pdf` genera los PDF). Las capturas se regeneran con `docs/manual/demo/run.sh`.
+
+Paquete para producción: `./deploy/build.sh`; instalación: `sudo ./deploy/install.sh correo.ejemplo.es`.
 
 Tests: `cargo test --workspace` y `cd web && npm test`.
 

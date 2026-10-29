@@ -10,23 +10,54 @@ use buzon_store::AppDb;
 use buzon_sync::{OAuthApp, Provider};
 use config::Config;
 
-fn config_path() -> Option<PathBuf> {
+const USAGE: &str = "Uso:
+  buzon [--config FICHERO]                               arranca el servidor
+  buzon [--config FICHERO] backup CARPETA [--keep N]     copia de seguridad en caliente
+
+La configuración también se puede indicar con BUZON_CONFIG.
+Copias: crea CARPETA/buzon-AAAAMMDD-HHMMSS y deja las N más recientes (7 por defecto).";
+
+enum Command {
+    Serve,
+    Backup { dest: PathBuf, keep: usize },
+}
+
+fn parse_args() -> anyhow::Result<(Option<PathBuf>, Command)> {
+    let mut config = std::env::var_os("BUZON_CONFIG").map(PathBuf::from);
+    let mut keep = 7;
+    let mut positional = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
-            "--config" | "-c" => return args.next().map(PathBuf::from),
+            "--config" | "-c" => config = args.next().map(PathBuf::from),
+            "--keep" => {
+                keep = args
+                    .next()
+                    .and_then(|n| n.parse().ok())
+                    .filter(|n| *n > 0)
+                    .context("--keep necesita un número mayor que 0")?
+            }
             "--version" | "-V" => {
                 println!("buzon {}", env!("CARGO_PKG_VERSION"));
                 std::process::exit(0);
             }
             "--help" | "-h" => {
-                println!("Uso: buzon [--config /etc/buzon/config.toml]");
+                println!("{USAGE}");
                 std::process::exit(0);
             }
-            _ => {}
+            _ if a.starts_with('-') => anyhow::bail!("opción desconocida: {a}\n\n{USAGE}"),
+            _ => positional.push(a),
         }
     }
-    std::env::var_os("BUZON_CONFIG").map(PathBuf::from)
+    let cmd = match positional.as_slice() {
+        [] => Command::Serve,
+        [b, dest] if b == "backup" => Command::Backup {
+            dest: PathBuf::from(dest),
+            keep,
+        },
+        _ => anyhow::bail!("{USAGE}"),
+    };
+    Ok((config, cmd))
 }
 
 /// Lee la clave maestra o crea una nueva (permisos 600) la primera vez.
@@ -61,7 +92,28 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let cfg = Config::load(config_path().as_deref())?;
+    let (config, cmd) = parse_args()?;
+    let cfg = Config::load(config.as_deref())?;
+    if let Command::Backup { dest, keep } = cmd {
+        let r = buzon_store::backup::backup(&cfg.data_dir, &dest, keep)
+            .await
+            .context("haciendo la copia de seguridad")?;
+        println!(
+            "Copia en {}: {} bases de datos, {} ficheros copiados y {} enlazados de la copia anterior.",
+            r.path.display(),
+            r.databases,
+            r.copied,
+            r.linked
+        );
+        for old in r.removed {
+            println!("Borrada la copia antigua {}", old.display());
+        }
+        println!(
+            "Recuerda guardar aparte la clave maestra ({}): sin ella no se pueden leer las contraseñas de las cuentas.",
+            cfg.master_key_path().display()
+        );
+        return Ok(());
+    }
     std::fs::create_dir_all(&cfg.data_dir)?;
     let master = load_master_key(&cfg.master_key_path())?;
     let db = AppDb::open(&cfg.data_dir.join("app.db"))

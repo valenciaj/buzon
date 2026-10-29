@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Icon } from './Icons'
+import { manualUrl } from '../../lib/manual'
 
 /** Las teclas, para la ayuda. «g i» son dos pulsaciones seguidas. */
 const KEYS: [string, string][] = [
@@ -14,7 +15,7 @@ const KEYS: [string, string][] = [
 ]
 
 export function Shortcuts({ onClose }: { onClose: () => void }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const close = useRef<HTMLButtonElement>(null)
   useEffect(() => close.current?.focus(), [])
   return (
@@ -40,6 +41,8 @@ export function Shortcuts({ onClose }: { onClose: () => void }) {
             </div>
           ))}
         </dl>
+        <a href={manualUrl(i18n.language, 'shortcuts')} target="_blank" rel="noopener"
+          className="border-t border-line px-4 py-3 text-sm text-accent hover:underline">{t('home.manualMore')}</a>
       </div>
     </div>
   )

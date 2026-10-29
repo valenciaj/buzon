@@ -157,7 +157,9 @@
     "settings": "Settings",
     "logout": "Sign out",
     "menu": "Menu",
-    "contacts": "Contacts"
+    "contacts": "Contacts",
+    "manual": "Help manual",
+    "manualMore": "More in the help manual"
   },
   "settings": {
     "title": "Settings",

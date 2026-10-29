@@ -1,0 +1,16 @@
+# Instancia de demostración para las capturas del manual (ver run.sh). No usar en producción.
+listen = "127.0.0.1:8089"
+data_dir = "data"
+web_dir = "../../../web/dist"
+public_url = "http://127.0.0.1:8089"
+cookie_secure = false
+allow_insecure_mail = true
+
+# Datos falsos: solo para que se vean los botones de «Conectar con…».
+[oauth.google]
+client_id = "demo"
+client_secret = "demo"
+
+[oauth.microsoft]
+client_id = "demo"
+client_secret = "demo"

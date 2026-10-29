@@ -1,0 +1,18 @@
+{
+  "name": "buzon-manual",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vitepress dev",
+    "build": "vitepress build",
+    "pdf": "node scripts/pdf.mjs",
+    "screenshots": "node scripts/screenshots.mjs"
+  },
+  "devDependencies": {
+    "@fontsource/atkinson-hyperlegible-next": "^5.2.0",
+    "playwright": "1.63.0",
+    "vitepress": "1.6.4"
+  }
+}
