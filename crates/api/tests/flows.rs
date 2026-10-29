@@ -1720,3 +1720,165 @@ async fn webhooks_are_signed_queued_and_redelivered() {
         .unwrap()
         .is_empty());
 }
+
+#[tokio::test]
+async fn scheduled_sends_can_be_undone_and_followed_up() {
+    let t = app_with(true).await;
+    buzon_api::start_background(t.state.clone());
+    let cookie = t.setup().await;
+    let (port, received) = fake_smtp().await;
+    let acc = t
+        .call(
+            "POST",
+            "/api/v1/accounts",
+            Some(&cookie),
+            Some(json!({
+                "name": "Pruebas", "email": "yo@pruebas.es",
+                "imap_host": "127.0.0.1", "imap_port": 1, "imap_security": "none",
+                "smtp_host": "127.0.0.1", "smtp_port": port, "smtp_security": "none",
+                "login": "yo", "password": "x", "verify": false
+            })),
+        )
+        .await;
+    assert_eq!(acc.status, StatusCode::OK, "{}", acc.body);
+    let ids = t.call("GET", "/api/v1/identities", Some(&cookie), None).await;
+    let identity = ids
+        .body
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["email"] == "yo@pruebas.es")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let now = buzon_store::now();
+    let mail = |subject: &str, send_at: i64| {
+        json!({
+            "identity_id": identity, "to": [{"email": "ana@ejemplo.es"}],
+            "subject": subject, "text": "Hola", "send_at": send_at, "follow_up_days": 3,
+        })
+    };
+
+    for bad in [
+        json!({"identity_id": identity, "subject": "x", "send_at": now + 60}),
+        json!({"identity_id": identity, "to": [{"email": "ana@ejemplo.es"}], "send_at": now + 400 * 86400}),
+        json!({"identity_id": identity, "to": [{"email": "ana@ejemplo.es"}], "send_at": now + 60, "follow_up_days": 90}),
+    ] {
+        let r = t.call("POST", "/api/v1/send", Some(&cookie), Some(bad)).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.body);
+    }
+
+    // Programado para mañana: se puede cancelar y vuelve a Borradores.
+    let r = t
+        .call("POST", "/api/v1/send", Some(&cookie), Some(mail("Mañana", now + 86400)))
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    assert!(r.body["message_id"].is_null());
+    let later = r.body["scheduled_id"].as_str().unwrap().to_string();
+    let list = t.call("GET", "/api/v1/scheduled", Some(&cookie), None).await.body;
+    assert_eq!(
+        (list[0]["subject"].as_str(), list[0]["follow_up_days"].as_i64()),
+        (Some("Mañana"), Some(3))
+    );
+    assert!(t
+        .call("GET", "/api/v1/drafts", Some(&cookie), None)
+        .await
+        .body
+        .as_array()
+        .unwrap()
+        .is_empty());
+    let r = t
+        .call(
+            "POST",
+            &format!("/api/v1/scheduled/{later}/cancel"),
+            Some(&cookie),
+            None,
+        )
+        .await;
+    assert_eq!(
+        (r.status, r.body["send_at"].is_null()),
+        (StatusCode::OK, true),
+        "{}",
+        r.body
+    );
+    assert_eq!(
+        t.call("GET", "/api/v1/drafts", Some(&cookie), None).await.body[0]["subject"],
+        "Mañana"
+    );
+    let r = t
+        .call(
+            "POST",
+            &format!("/api/v1/scheduled/{later}/cancel"),
+            Some(&cookie),
+            None,
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CONFLICT);
+
+    // «Deshacer envío»: sale a los pocos segundos si nadie lo cancela.
+    let r = t
+        .call(
+            "POST",
+            "/api/v1/send",
+            Some(&cookie),
+            Some(mail("Presupuesto", now + 1)),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    let (rcpt, data) = tokio::time::timeout(std::time::Duration::from_secs(10), received)
+        .await
+        .expect("el envío programado no sale")
+        .unwrap();
+    assert_eq!(rcpt.len(), 1);
+    assert!(data.contains("Subject: Presupuesto"), "{data}");
+    for _ in 0..50 {
+        if t.call("GET", "/api/v1/scheduled", Some(&cookie), None)
+            .await
+            .body
+            .as_array()
+            .unwrap()
+            .is_empty()
+        {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(t
+        .call("GET", "/api/v1/scheduled", Some(&cookie), None)
+        .await
+        .body
+        .as_array()
+        .unwrap()
+        .is_empty());
+
+    // Seguimiento: espera respuesta, aún sin vencer.
+    let f = t.call("GET", "/api/v1/followups", Some(&cookie), None).await.body;
+    assert_eq!(f.as_array().unwrap().len(), 1, "{f}");
+    assert_eq!(
+        (f[0]["subject"].as_str(), f[0]["to"][0]["email"].as_str()),
+        (Some("Presupuesto"), Some("ana@ejemplo.es"))
+    );
+    assert!(f[0]["due_at"].as_i64().unwrap() >= now + 3 * 86400);
+    assert!(t
+        .call("GET", "/api/v1/followups?due=true", Some(&cookie), None)
+        .await
+        .body
+        .as_array()
+        .unwrap()
+        .is_empty());
+    let id = f[0]["id"].as_str().unwrap();
+    assert_eq!(
+        t.call("DELETE", &format!("/api/v1/followups/{id}"), Some(&cookie), None)
+            .await
+            .status,
+        StatusCode::NO_CONTENT
+    );
+    assert!(t
+        .call("GET", "/api/v1/followups", Some(&cookie), None)
+        .await
+        .body
+        .as_array()
+        .unwrap()
+        .is_empty());
+}

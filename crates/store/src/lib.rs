@@ -4,6 +4,7 @@
 pub mod app;
 pub mod compose;
 pub mod crypto;
+pub mod extras;
 pub mod flow;
 pub mod hooks;
 pub mod id;

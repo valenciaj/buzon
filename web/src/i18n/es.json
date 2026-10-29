@@ -283,7 +283,18 @@
     "fwdSubject": "Asunto:",
     "fwdTo": "Para:",
     "localDrafts": "Borradores de Buzón",
-    "draft": "Borrador"
+    "draft": "Borrador",
+    "scheduledFor": "Programado para el {{when}}.",
+    "schedule": "Programar envío",
+    "scheduleAt": "Elegir fecha y hora",
+    "followUp": "Avisarme si no responden",
+    "followUpOn_one": "Aviso si no responden en {{count}} día",
+    "followUpOn_other": "Aviso si no responden en {{count}} días",
+    "followUpHint": "Te avisaré en «Sin respuesta» si nadie contesta.",
+    "followUpDays_one": "En {{count}} día",
+    "followUpDays_other": "En {{count}} días",
+    "followUpOff": "No avisar",
+    "sendFailed": "No salió: {{error}}"
   },
   "identity": {
     "intro": "Las direcciones desde las que escribes: la de cada cuenta y sus alias. Cada una puede tener su firma.",
@@ -442,7 +453,9 @@
     "then": "y luego",
     "replyLater": "Responder luego",
     "aside": "Apartar",
-    "snooze": "Posponer hasta mañana"
+    "snooze": "Posponer hasta mañana",
+    "goToday": "Ir a Hoy",
+    "palette": "Paleta de órdenes"
   },
   "flow": {
     "views": {
@@ -585,5 +598,63 @@
       "failed": "Falló",
       "pending": "Pendiente"
     }
+  },
+  "pages": {
+    "today": "Hoy",
+    "scheduled": "Programados",
+    "followups": "Sin respuesta"
+  },
+  "today": {
+    "title": "Hoy",
+    "unreadPrincipal": "sin leer en Principal",
+    "unreadInbox": "sin leer en la entrada",
+    "noReply": "Sin respuesta",
+    "scheduled": "Programados",
+    "allClear": "Todo en orden: no hay nada pendiente.",
+    "sentTo": "A {{who}} · {{date}}",
+    "leavingSoon": "Sale en las próximas 24 horas"
+  },
+  "scheduled": {
+    "intro": "Correos que saldrán solos a su hora. Puedes cambiarlos o cancelarlos hasta entonces.",
+    "none": "No hay envíos programados.",
+    "at": "Sale el {{when}}",
+    "leaving": "Saliendo ahora…",
+    "edit": "Cambiar",
+    "cancel": "Cancelar envío",
+    "cancelled": "Envío cancelado. Está en Borradores."
+  },
+  "followups": {
+    "intro": "Correos que enviaste pidiendo aviso. Desaparecen solos cuando alguien responde.",
+    "none": "No esperas respuesta de nadie.",
+    "overdue": "Sin respuesta todavía",
+    "waiting": "Esperando hasta el {{date}}",
+    "dismiss": "Ya no espero respuesta"
+  },
+  "palette": {
+    "title": "Paleta de órdenes",
+    "placeholder": "¿Qué quieres hacer? (ir a, redactar, tema…)",
+    "none": "No hay nada con ese nombre.",
+    "search": "Buscar «{{q}}» en el correo",
+    "mode": "Cambiar a modo {{mode}}",
+    "theme": "Tema: {{theme}}",
+    "groups": {
+      "go": "Ir a",
+      "actions": "Acciones",
+      "settings": "Ajustes",
+      "search": "Buscar"
+    }
+  },
+  "prefs": {
+    "title": "Envío y avisos",
+    "undo": "Deshacer envío",
+    "undoHint": "Tiempo para arrepentirte después de pulsar Enviar.",
+    "seconds_one": "{{count}} s",
+    "seconds_other": "{{count}} s",
+    "noUndo": "Sin margen",
+    "notify": "Notificaciones",
+    "notifyBody": "Avisarme en este dispositivo cuando llegue correo (en Enfoque, solo de Principal).",
+    "notifyUnsupported": "Este navegador no admite notificaciones.",
+    "notifyDenied": "El navegador las tiene bloqueadas. Permítelas en los ajustes del sitio.",
+    "installHint": "En el móvil, añade Buzón a la pantalla de inicio para usarlo como una app."
   }
 }

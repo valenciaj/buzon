@@ -29,6 +29,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   font: 'atkinson',
   font_size: 100,
   density: 'comfortable',
+  undo_send: 10,
 }
 
 /** Aplica tema, fuente, tamaño y densidad al documento. */

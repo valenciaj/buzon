@@ -6,11 +6,17 @@ import { customFolders, LABEL_COLORS, ROLE_ORDER, snoozeOptions } from '../../li
 import { Icon } from './Icons'
 
 /** Botón con un menú desplegable. Se cierra al pulsar fuera o con Escape. */
-export function Popover({ label, icon, children, align = 'left', compact }: {
+export function Popover({ label, icon, children, align = 'left', compact, up, active, fromParent }: {
   label: string
   icon: string
   children: (close: () => void) => ReactNode
   align?: 'left' | 'right'
+  /** Se abre hacia arriba (para botones al pie de la pantalla). */
+  up?: boolean
+  /** Resalta el botón (hay algo elegido). */
+  active?: boolean
+  /** El menú se coloca respecto al contenedor (que debe ser `relative`), no al botón. */
+  fromParent?: boolean
   /** Solo el icono (el nombre queda como título y para lectores de pantalla). */
   compact?: boolean
 }) {
@@ -28,13 +34,13 @@ export function Popover({ label, icon, children, align = 'left', compact }: {
     }
   }, [open])
   return (
-    <div ref={ref} className="relative">
-      <button className="btn btn-ghost px-2.5" aria-expanded={open} aria-haspopup="menu" title={label}
+    <div ref={ref} className={fromParent ? '' : 'relative'}>
+      <button type="button" className={`btn btn-ghost px-2.5 ${active ? 'text-accent' : ''}`} aria-expanded={open} aria-haspopup="menu" title={label}
         onClick={() => setOpen(!open)}>
         <Icon name={icon} /> <span className={compact ? 'sr-only' : 'max-sm:sr-only'}>{label}</span>
       </button>
       {open && (
-        <div role="menu" className={`absolute top-full z-20 mt-1 max-h-[60vh] w-64 overflow-y-auto rounded-lg border border-line bg-surface py-1 shadow-lg ${align === 'right' ? 'right-0' : 'left-0'}`}>
+        <div role="menu" className={`absolute z-20 ${up ? 'bottom-full mb-1' : 'top-full mt-1'} max-h-[60vh] w-64 max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-lg border border-line bg-surface py-1 shadow-lg ${align === 'right' ? 'right-0' : fromParent ? 'left-3' : 'left-0'}`}>
           {children(() => setOpen(false))}
         </div>
       )}
@@ -153,7 +159,7 @@ export function SnoozeMenu({ snoozed, onSnooze, compact }: {
               close()
               onSnooze(Math.floor(at / 1000))
             }}>
-            <input type="datetime-local" className="input min-h-9 py-1 text-sm" aria-label={t('flow.snoozeOptions.pick')}
+            <input type="datetime-local" className="input min-h-9 min-w-0 flex-1 py-1 text-sm" aria-label={t('flow.snoozeOptions.pick')}
               value={pick} onChange={(e) => setPick(e.target.value)} />
             <button className="btn min-h-9 px-2.5 py-1 text-sm" disabled={!pick}>OK</button>
           </form>

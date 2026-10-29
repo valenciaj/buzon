@@ -24,11 +24,12 @@ pub mod hooks;
 pub mod models;
 mod prefs;
 pub mod routes;
+mod scheduler;
 pub mod session;
 mod validate;
 
 use error::{ApiError, ApiResult};
-use routes::{accounts, auth, compose, flow, invitations, mail, me, organize, setup, tokens, webhooks};
+use routes::{accounts, auth, compose, extras, flow, invitations, mail, me, organize, setup, tokens, webhooks};
 
 pub struct AppState {
     pub db: AppDb,
@@ -46,6 +47,10 @@ pub struct AppState {
     pub allow_private_webhooks: bool,
     /// Despierta al repartidor de webhooks cuando hay envíos nuevos en la cola.
     pub hooks_ready: tokio::sync::Notify,
+    /// Despierta al repartidor de envíos programados.
+    pub sends_ready: tokio::sync::Notify,
+    /// Correo nuevo, para las notificaciones del navegador: (usuario, datos).
+    pub notices: tokio::sync::broadcast::Sender<(Id, serde_json::Value)>,
     user_dbs: Mutex<HashMap<Id, UserDb>>,
     /// Peticiones de cada token en el minuto en curso.
     rate: Mutex<HashMap<Id, (i64, u32)>>,
@@ -69,6 +74,8 @@ impl AppState {
             allow_insecure_mail: false,
             allow_private_webhooks: false,
             hooks_ready: tokio::sync::Notify::new(),
+            sends_ready: tokio::sync::Notify::new(),
+            notices: tokio::sync::broadcast::channel(256).0,
             user_dbs: Mutex::new(HashMap::new()),
             rate: Mutex::new(HashMap::new()),
         }
@@ -200,6 +207,7 @@ impl AppState {
         compose::upload, compose::delete_upload,
         compose::drafts, compose::create_draft, compose::update_draft, compose::delete_draft,
         compose::send_mail, compose::contacts,
+        extras::scheduled, extras::cancel, extras::followups, extras::dismiss,
         organize::move_threads, organize::delete_threads, organize::flag_threads, organize::label_threads,
         organize::labels, organize::create_label, organize::update_label, organize::delete_label,
         organize::rules, organize::create_rule, organize::update_rule, organize::delete_rule,
@@ -326,6 +334,10 @@ pub fn api_router(state: Arc<AppState>) -> Router {
         .route("/drafts", get(compose::drafts).post(compose::create_draft))
         .route("/drafts/{id}", put(compose::update_draft).delete(compose::delete_draft))
         .route("/send", post(compose::send_mail))
+        .route("/scheduled", get(extras::scheduled))
+        .route("/scheduled/{id}/cancel", post(extras::cancel))
+        .route("/followups", get(extras::followups))
+        .route("/followups/{id}", delete(extras::dismiss))
         .route("/contacts/suggest", get(compose::contacts))
         .route("/contacts", get(organize::book).post(organize::create_entry))
         .route("/contacts/import", post(organize::import_vcard))
@@ -366,6 +378,12 @@ pub fn api_router(state: Arc<AppState>) -> Router {
         .nest("/api/v1", v1)
         .route("/api/openapi.json", get(|| async { Json(ApiDoc::openapi()) }))
         .merge(Scalar::with_url("/api/docs", ApiDoc::openapi()))
+}
+
+/// Arranca las tareas de fondo: webhooks y envíos programados.
+pub fn start_background(state: Arc<AppState>) {
+    hooks::start(state.clone());
+    scheduler::start(state);
 }
 
 /// Router completo: API, documentación y, si se indica, el frontend compilado.

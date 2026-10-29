@@ -63,6 +63,8 @@ pub struct Preferences {
     /// Tamaño del texto en %, de 87.5 a 150 en pasos de 12.5.
     pub font_size: f64,
     pub density: Density,
+    /// Segundos para «deshacer envío»: 0 (sin margen), 5, 10, 20 o 30.
+    pub undo_send: u32,
 }
 
 impl Default for Preferences {
@@ -74,6 +76,7 @@ impl Default for Preferences {
             font: Font::default(),
             font_size: 100.0,
             density: Density::default(),
+            undo_send: 10,
         }
     }
 }
@@ -87,6 +90,7 @@ pub struct PreferencesUpdate {
     pub font: Option<Font>,
     pub font_size: Option<f64>,
     pub density: Option<Density>,
+    pub undo_send: Option<u32>,
     /// Idioma de la interfaz: `es` o `en`. Se guarda en el usuario.
     pub language: Option<String>,
 }
@@ -597,6 +601,11 @@ pub struct DraftOut {
     pub forward_of: Option<Id>,
     pub attachments: Vec<UploadOut>,
     pub updated_at: i64,
+    /// Cuándo sale, si está programado (negativo: se está enviando ahora).
+    pub send_at: Option<i64>,
+    /// Por qué falló el último envío programado.
+    pub send_error: Option<String>,
+    pub follow_up_days: Option<i64>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -606,12 +615,52 @@ pub struct SendRequest {
     /// Borrador que se envía: se borra al terminar.
     #[schema(value_type = Option<String>)]
     pub draft_id: Option<Id>,
+    /// Programa el envío para esta fecha (segundos Unix). La web lo usa también para
+    /// «deshacer envío»: sale unos segundos después y se puede cancelar.
+    pub send_at: Option<i64>,
+    /// Avisar si nadie responde en estos días (1 a 30).
+    pub follow_up_days: Option<i64>,
 }
 
 #[derive(Serialize, ToSchema)]
 pub struct SendResult {
-    /// `Message-ID` del correo enviado.
-    pub message_id: String,
+    /// `Message-ID` del correo enviado (si ha salido ya).
+    pub message_id: Option<String>,
+    /// Si se ha programado: el borrador que saldrá y cuándo.
+    #[schema(value_type = Option<String>)]
+    pub scheduled_id: Option<Id>,
+    pub send_at: Option<i64>,
+}
+
+/// Correo enviado que espera respuesta.
+#[derive(Serialize, ToSchema)]
+pub struct FollowUpOut {
+    #[schema(value_type = String)]
+    pub id: Id,
+    #[schema(value_type = String)]
+    pub account_id: Id,
+    pub subject: String,
+    pub to: Vec<AddrIn>,
+    pub sent_at: i64,
+    /// Desde cuándo cuenta como «sin respuesta».
+    pub due_at: i64,
+    /// Hilo del correo enviado (cuando ya se ha sincronizado la copia).
+    #[schema(value_type = Option<String>)]
+    pub thread: Option<Id>,
+}
+
+impl From<buzon_store::extras::FollowUp> for FollowUpOut {
+    fn from(f: buzon_store::extras::FollowUp) -> Self {
+        FollowUpOut {
+            id: f.id,
+            account_id: f.account_id,
+            subject: f.subject,
+            to: f.to.into_iter().map(Into::into).collect(),
+            sent_at: f.sent_at,
+            due_at: f.due_at,
+            thread: f.thread,
+        }
+    }
 }
 
 #[derive(Serialize, ToSchema)]

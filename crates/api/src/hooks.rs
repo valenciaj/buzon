@@ -42,6 +42,21 @@ async fn bridge(st: Arc<AppState>) {
             HookEvent::Received { user, message, .. } => {
                 let Ok(udb) = st.user_db(user).await else { continue };
                 if let Ok(Some(m)) = udb.message_brief(message).await {
+                    // Para las notificaciones del navegador: la web decide según el modo.
+                    let sender = match &m.from {
+                        Some(f) => udb.sender(&f.email).await.ok().flatten(),
+                        None => None,
+                    };
+                    let notice = json!({
+                        "thread": m.thread,
+                        "account": m.account,
+                        "from": m.from,
+                        "subject": m.subject,
+                        "snippet": m.snippet,
+                        "status": sender.as_ref().map(|s| s.status.as_str()),
+                        "bucket": sender.as_ref().map(|s| s.bucket.as_str()),
+                    });
+                    let _ = st.notices.send((user, notice));
                     st.emit_hook(user, "message.received", json!(m)).await;
                 }
             }

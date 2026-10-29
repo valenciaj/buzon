@@ -18,6 +18,9 @@ describe('carpetas', () => {
     expect(parseBox('v:screener')).toEqual({ view: 'screener' })
     expect(boxKey({ view: 'reply_later' })).toBe('v:reply_later')
     expect(parseBox('v:nada')).toEqual({ role: 'inbox' })
+    expect(parseBox('p:today')).toEqual({ page: 'today' })
+    expect(boxKey({ page: 'followups' })).toBe('p:followups')
+    expect(parseBox('p:nada')).toEqual({ role: 'inbox' })
   })
   it('propone cuándo posponer', () => {
     const keys = (d: Date) => snoozeOptions(d).map((o) => o.key)
