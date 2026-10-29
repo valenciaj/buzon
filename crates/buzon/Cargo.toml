@@ -8,6 +8,7 @@ license.workspace = true
 anyhow.workspace = true
 buzon-api.workspace = true
 buzon-store.workspace = true
+buzon-sync.workspace = true
 serde.workspace = true
 tokio.workspace = true
 toml.workspace = true

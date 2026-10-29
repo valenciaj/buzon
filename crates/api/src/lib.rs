@@ -14,7 +14,7 @@ use buzon_store::app::User;
 use buzon_store::crypto::{self, MasterKey, SecretBox};
 use buzon_store::user::Account;
 use buzon_store::{AppDb, Id, UserDb};
-use buzon_sync::SyncHub;
+use buzon_sync::{Creds, OAuthApp, Provider, SyncHub};
 use tower_http::services::{ServeDir, ServeFile};
 use utoipa::OpenApi;
 use utoipa_scalar::{Scalar, Servable};
@@ -29,7 +29,7 @@ pub mod session;
 mod validate;
 
 use error::{ApiError, ApiResult};
-use routes::{accounts, auth, compose, extras, flow, invitations, mail, me, organize, setup, tokens, webhooks};
+use routes::{accounts, auth, compose, extras, flow, invitations, mail, me, oauth, organize, setup, tokens, webhooks};
 
 pub struct AppState {
     pub db: AppDb,
@@ -49,9 +49,14 @@ pub struct AppState {
     pub hooks_ready: tokio::sync::Notify,
     /// Despierta al repartidor de envíos programados.
     pub sends_ready: tokio::sync::Notify,
+    /// Aplicaciones OAuth2 configuradas (Gmail, Outlook).
+    pub oauth: HashMap<Provider, Arc<OAuthApp>>,
+    /// Autorizaciones de OAuth2 en curso, por su `state`.
+    pub(crate) oauth_pending: Mutex<HashMap<String, routes::oauth::Pending>>,
     /// Correo nuevo, para las notificaciones del navegador: (usuario, datos).
     pub notices: tokio::sync::broadcast::Sender<(Id, serde_json::Value)>,
     user_dbs: Mutex<HashMap<Id, UserDb>>,
+    opening: tokio::sync::Mutex<()>,
     /// Peticiones de cada token en el minuto en curso.
     rate: Mutex<HashMap<Id, (i64, u32)>>,
 }
@@ -76,7 +81,10 @@ impl AppState {
             hooks_ready: tokio::sync::Notify::new(),
             sends_ready: tokio::sync::Notify::new(),
             notices: tokio::sync::broadcast::channel(256).0,
+            oauth: HashMap::new(),
+            oauth_pending: Mutex::new(HashMap::new()),
             user_dbs: Mutex::new(HashMap::new()),
+            opening: tokio::sync::Mutex::new(()),
             rate: Mutex::new(HashMap::new()),
         }
     }
@@ -90,12 +98,36 @@ impl AppState {
     /// Empieza a sincronizar una cuenta.
     pub async fn start_account(&self, user: Id, account: &Account) -> ApiResult<()> {
         let udb = self.user_db(user).await?;
-        let password = udb
-            .account_password(account.id, &self.secrets_for(user))
-            .await?
-            .unwrap_or_default();
-        self.sync.start(user, udb, account, password);
+        match self.creds(user, account).await {
+            Ok(creds) => self.sync.start(user, udb, account, creds),
+            Err(e) => {
+                tracing::warn!("cuenta {}: {}", account.id, e.message);
+                let _ = udb.set_sync_result(account.id, Some(&e.message)).await;
+            }
+        }
         Ok(())
+    }
+
+    /// Con qué se entra en el correo de la cuenta: su contraseña o su app de OAuth2.
+    pub async fn creds(&self, user: Id, account: &Account) -> ApiResult<Creds> {
+        let secrets = self.secrets_for(user);
+        if account.auth == "password" {
+            let udb = self.user_db(user).await?;
+            let password = udb.account_password(account.id, &secrets).await?.unwrap_or_default();
+            return Ok(Creds::Password(password));
+        }
+        let app = Provider::parse(&account.auth)
+            .and_then(|p| self.oauth.get(&p))
+            .ok_or_else(|| {
+                ApiError::bad_request(format!(
+                    "El servidor ya no tiene configurado el acceso con {}. Avisa al administrador.",
+                    account.auth
+                ))
+            })?;
+        Ok(Creds::OAuth {
+            app: app.clone(),
+            secrets: Arc::new(secrets),
+        })
     }
 
     /// Al arrancar el servidor: sincroniza las cuentas de todos los usuarios.
@@ -112,8 +144,14 @@ impl AppState {
 
     /// Base de datos del usuario (la crea la primera vez).
     pub async fn user_db(&self, user: Id) -> ApiResult<UserDb> {
-        if let Some(db) = self.user_dbs.lock().expect("mutex").get(&user) {
-            return Ok(db.clone());
+        let cached = || self.user_dbs.lock().expect("mutex").get(&user).cloned();
+        if let Some(db) = cached() {
+            return Ok(db);
+        }
+        // Una apertura cada vez: dos a la vez aplicarían las migraciones dos veces.
+        let _guard = self.opening.lock().await;
+        if let Some(db) = cached() {
+            return Ok(db);
         }
         let db = UserDb::open(&self.data_dir, user).await?;
         self.user_dbs.lock().expect("mutex").insert(user, db.clone());
@@ -202,6 +240,7 @@ impl AppState {
         auth::login, auth::logout,
         me::get, me::update_preferences, me::totp_setup, me::totp_enable, me::totp_disable,
         accounts::list, accounts::create, accounts::remove, accounts::sync,
+        oauth::providers, oauth::start, oauth::callback,
         mail::mailboxes, mail::threads, mail::thread, mail::update_thread, mail::attachment, mail::events,
         compose::identities, compose::create_identity, compose::update_identity, compose::delete_identity,
         compose::upload, compose::delete_upload,
@@ -222,7 +261,7 @@ impl AppState {
         (name = "setup", description = "Asistente de primer arranque"),
         (name = "auth", description = "Inicio y cierre de sesión"),
         (name = "me", description = "Usuario actual, preferencias y 2FA"),
-        (name = "accounts", description = "Cuentas de correo del usuario"),
+        (name = "accounts", description = "Cuentas de correo del usuario, con contraseña o con OAuth2 (Gmail, Outlook)"),
         (name = "mail", description = "Carpetas, hilos, mensajes y avisos en vivo"),
         (name = "compose", description = "Redactar y enviar: identidades, firmas, borradores y adjuntos"),
         (name = "organize", description = "Mover y borrar hilos, etiquetas, filtros automáticos y contactos"),
@@ -316,6 +355,9 @@ pub fn api_router(state: Arc<AppState>) -> Router {
         .route("/accounts", get(accounts::list).post(accounts::create))
         .route("/accounts/{id}", delete(accounts::remove))
         .route("/accounts/{id}/sync", post(accounts::sync))
+        .route("/oauth/providers", get(oauth::providers))
+        .route("/oauth/{provider}/start", post(oauth::start))
+        .route("/oauth/callback", get(oauth::callback))
         .route("/mailboxes", get(mail::mailboxes))
         .route("/threads", get(mail::threads))
         .route("/threads/{id}", get(mail::thread).patch(mail::update_thread))

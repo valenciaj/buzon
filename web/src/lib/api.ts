@@ -47,8 +47,12 @@ export interface AccountInput {
 
 export type SyncState = 'off' | 'connecting' | 'syncing' | 'idle' | 'error'
 
+export type OAuthProvider = 'google' | 'microsoft'
+
 export interface Account extends Omit<AccountInput, 'password' | 'verify'> {
   id: string
+  /** Cómo se entra: con contraseña o con OAuth2 (Gmail, Outlook). */
+  auth: 'password' | OAuthProvider
   state: SyncState
   synced_at: number | null
   sync_error: string | null
@@ -415,6 +419,9 @@ export const api = {
   accounts: () => call<Account[]>('GET', '/accounts'),
   addAccount: (a: AccountInput) => call<Account>('POST', '/accounts', a),
   deleteAccount: (id: string) => call<void>('DELETE', `/accounts/${id}`),
+  oauthProviders: () => call<{ providers: OAuthProvider[] }>('GET', '/oauth/providers'),
+  oauthStart: (provider: OAuthProvider, login_hint?: string) =>
+    call<{ url: string }>('POST', `/oauth/${provider}/start`, { login_hint }),
   syncAccount: (id: string) => call<void>('POST', `/accounts/${id}/sync`),
   mailboxes: (account?: string) => call<Mailbox[]>('GET', `/mailboxes${query({ account })}`),
   threads: (f: ThreadFilter, cursor?: string) => call<ThreadPage>('GET', `/threads${query({ ...f, cursor })}`),

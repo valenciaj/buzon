@@ -7,13 +7,16 @@ license.workspace = true
 [dependencies]
 ammonia.workspace = true
 async-imap.workspace = true
+base64.workspace = true
 buzon-store.workspace = true
 futures.workspace = true
 lettre.workspace = true
 mail-parser.workspace = true
+reqwest.workspace = true
 rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-rustls.workspace = true

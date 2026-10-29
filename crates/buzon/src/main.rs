@@ -7,6 +7,7 @@ use anyhow::Context;
 use buzon_api::AppState;
 use buzon_store::crypto::MasterKey;
 use buzon_store::AppDb;
+use buzon_sync::{OAuthApp, Provider};
 use config::Config;
 
 fn config_path() -> Option<PathBuf> {
@@ -81,6 +82,15 @@ async fn main() -> anyhow::Result<()> {
     .with_sync();
     state.allow_insecure_mail = cfg.allow_insecure_mail;
     state.allow_private_webhooks = cfg.allow_private_webhooks;
+    if let Some(g) = &cfg.oauth.google {
+        let app = OAuthApp::google(g.client_id.clone(), g.client_secret.clone());
+        state.oauth.insert(Provider::Google, Arc::new(app));
+    }
+    if let Some(m) = &cfg.oauth.microsoft {
+        let tenant = m.tenant.as_deref().unwrap_or("common");
+        let app = OAuthApp::microsoft(m.client_id.clone(), m.client_secret.clone(), tenant);
+        state.oauth.insert(Provider::Microsoft, Arc::new(app));
+    }
     let state = Arc::new(state);
     buzon_api::start_background(state.clone());
     match state.start_all_accounts().await {

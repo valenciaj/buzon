@@ -22,6 +22,24 @@ pub struct Config {
     pub allow_insecure_mail: bool,
     /// Permite webhooks a la red local (y sin HTTPS). Útil para n8n o Home Assistant en casa.
     pub allow_private_webhooks: bool,
+    /// Aplicaciones OAuth2 para conectar Gmail y Outlook sin contraseña.
+    pub oauth: OAuthConfig,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct OAuthConfig {
+    pub google: Option<OAuthClient>,
+    pub microsoft: Option<OAuthClient>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OAuthClient {
+    pub client_id: String,
+    pub client_secret: String,
+    /// Solo Microsoft: `common`, `organizations`, `consumers` o el id de la organización.
+    pub tenant: Option<String>,
 }
 
 impl Default for Config {
@@ -35,6 +53,7 @@ impl Default for Config {
             cookie_secure: true,
             allow_insecure_mail: false,
             allow_private_webhooks: false,
+            oauth: OAuthConfig::default(),
         }
     }
 }
@@ -70,5 +89,17 @@ mod tests {
         assert!(c.cookie_secure);
         assert!(!c.allow_insecure_mail);
         assert!(!c.allow_private_webhooks);
+        assert!(c.oauth.google.is_none() && c.oauth.microsoft.is_none());
+    }
+
+    #[test]
+    fn oauth_sections_parse() {
+        let c: Config = toml::from_str(
+            "[oauth.google]\nclient_id = \"g\"\nclient_secret = \"s\"\n\
+             [oauth.microsoft]\nclient_id = \"m\"\nclient_secret = \"t\"\ntenant = \"consumers\"\n",
+        )
+        .unwrap();
+        assert_eq!(c.oauth.google.unwrap().client_id, "g");
+        assert_eq!(c.oauth.microsoft.unwrap().tenant.as_deref(), Some("consumers"));
     }
 }

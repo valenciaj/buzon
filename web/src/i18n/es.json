@@ -120,7 +120,17 @@
       "idle": "Al día",
       "error": "Error"
     },
-    "syncedAt": "Última sincronización: {{date}}"
+    "syncedAt": "Última sincronización: {{date}}",
+    "oauth": {
+      "title": "Conectar sin contraseña",
+      "body": "Para Gmail y Outlook: das permiso en su página y vuelves aquí. Buzón no ve tu contraseña y puedes retirar el permiso cuando quieras.",
+      "connect": "Conectar con {{provider}}",
+      "google": "Google",
+      "microsoft": "Microsoft",
+      "via": "con {{provider}}",
+      "connected": "Cuenta conectada. Buzón está descargando tu correo.",
+      "reconnect": "Volver a conectar"
+    }
   },
   "login": {
     "title": "Entra en Buzón",

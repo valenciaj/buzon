@@ -26,6 +26,8 @@ pub struct Account {
     /// `tls`, `starttls` o `none`.
     pub imap_security: String,
     pub smtp_security: String,
+    /// `password`, o el proveedor de OAuth2: `google` o `microsoft`.
+    pub auth: String,
     pub created_at: i64,
     /// Última sincronización completa sin errores.
     pub synced_at: Option<i64>,
@@ -40,7 +42,9 @@ pub struct NewAccount<'a> {
     pub smtp_host: &'a str,
     pub smtp_port: u16,
     pub login: &'a str,
+    /// Contraseña, o token de renovación si `auth` es un proveedor de OAuth2.
     pub password: &'a str,
+    pub auth: &'a str,
     pub imap_security: &'a str,
     pub smtp_security: &'a str,
 }
@@ -51,7 +55,7 @@ pub fn user_raw_dir(data_dir: &Path, user: Id) -> PathBuf {
 }
 
 const ACCOUNT_COLS: &str = "id, name, email, imap_host, imap_port, smtp_host, smtp_port, login, \
-    imap_security, smtp_security, created_at, synced_at, sync_error";
+    imap_security, smtp_security, auth, created_at, synced_at, sync_error";
 
 fn account_from_row(r: &sqlx::sqlite::SqliteRow) -> Result<Account> {
     Ok(Account {
@@ -65,6 +69,7 @@ fn account_from_row(r: &sqlx::sqlite::SqliteRow) -> Result<Account> {
         login: r.try_get("login")?,
         imap_security: r.try_get("imap_security")?,
         smtp_security: r.try_get("smtp_security")?,
+        auth: r.try_get("auth")?,
         created_at: r.try_get("created_at")?,
         synced_at: r.try_get("synced_at")?,
         sync_error: r.try_get("sync_error")?,
@@ -110,7 +115,7 @@ impl UserDb {
         let t = now();
         sqlx::query(
             "INSERT INTO accounts (id, name, email, imap_host, imap_port, smtp_host, smtp_port, login, secret, \
-             imap_security, smtp_security, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             imap_security, smtp_security, auth, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(id.as_bytes().as_slice())
         .bind(a.name)
@@ -123,6 +128,7 @@ impl UserDb {
         .bind(secrets.seal(a.password.as_bytes())?)
         .bind(a.imap_security)
         .bind(a.smtp_security)
+        .bind(a.auth)
         .bind(t)
         .execute(&self.pool)
         .await?;
@@ -137,6 +143,7 @@ impl UserDb {
             login: a.login.into(),
             imap_security: a.imap_security.into(),
             smtp_security: a.smtp_security.into(),
+            auth: a.auth.into(),
             created_at: t,
             synced_at: None,
             sync_error: None,
@@ -189,6 +196,28 @@ impl UserDb {
         Ok(())
     }
 
+    /// Cambia el secreto guardado: contraseña o token de renovación.
+    pub async fn set_account_secret(&self, id: Id, plain: &str, secrets: &SecretBox) -> Result<()> {
+        sqlx::query("UPDATE accounts SET secret = ? WHERE id = ?")
+            .bind(secrets.seal(plain.as_bytes())?)
+            .bind(id.as_bytes().as_slice())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Cuenta de OAuth2 ya conectada con esa dirección, para volver a conectarla en vez de duplicarla.
+    pub async fn account_by_email(&self, auth: &str, email: &str) -> Result<Option<Account>> {
+        let row = sqlx::query(&format!(
+            "SELECT {ACCOUNT_COLS} FROM accounts WHERE auth = ? AND lower(email) = lower(?)"
+        ))
+        .bind(auth)
+        .bind(email)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.as_ref().map(account_from_row).transpose()
+    }
+
     /// Contraseña IMAP/SMTP descifrada, para la sincronización.
     pub async fn account_password(&self, id: Id, secrets: &SecretBox) -> Result<Option<String>> {
         let sealed: Option<Vec<u8>> = sqlx::query_scalar("SELECT secret FROM accounts WHERE id = ?")
@@ -227,6 +256,7 @@ mod tests {
                     smtp_port: 465,
                     login: "yo@ejemplo.es",
                     password: "secreto",
+                    auth: "password",
                     imap_security: "tls",
                     smtp_security: "tls",
                 },
@@ -244,5 +274,25 @@ mod tests {
             .await
             .unwrap();
         assert!(!raw.windows(7).any(|w| w == b"secreto"));
+
+        // El secreto se puede cambiar (token de renovación nuevo) y sigue cifrado.
+        assert_eq!(acc.auth, "password");
+        db_a.set_account_secret(acc.id, "otro", &key).await.unwrap();
+        assert_eq!(
+            db_a.account_password(acc.id, &key).await.unwrap().as_deref(),
+            Some("otro")
+        );
+        assert!(db_a
+            .account_by_email("google", "YO@ejemplo.es")
+            .await
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            db_a.account_by_email("password", "YO@ejemplo.es")
+                .await
+                .unwrap()
+                .map(|a| a.id),
+            Some(acc.id)
+        );
     }
 }

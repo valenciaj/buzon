@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import { Link, NavLink, useParams } from 'react-router'
-import { api, ApiError, type AccountInput, type Identity, type IdentityInput, type Language, type Me, type Preferences } from '../lib/api'
+import { Link, NavLink, useParams, useSearchParams } from 'react-router'
+import { api, ApiError, type AccountInput, type OAuthProvider, type Identity, type IdentityInput, type Language, type Me, type Preferences } from '../lib/api'
 import { applyLook } from '../lib/look'
 import { useSetMe } from '../lib/session'
 import { setLanguage } from '../i18n'
@@ -108,6 +108,17 @@ function AccountsTab() {
   })
   const remove = useMutation({ mutationFn: api.deleteAccount, onSuccess: refresh })
   const sync = useMutation({ mutationFn: api.syncAccount, onSuccess: refresh })
+  const providers = useQuery({ queryKey: ['oauth-providers'], queryFn: api.oauthProviders })
+  // Gmail y Outlook: se va al proveedor y se vuelve aquí con ?oauth=ok o ?oauth_error=.
+  const connect = useMutation({
+    mutationFn: ({ provider, hint }: { provider: OAuthProvider; hint?: string }) => api.oauthStart(provider, hint),
+    onSuccess: ({ url }) => window.location.assign(url),
+  })
+  const [params, setParams] = useSearchParams()
+  const [back] = useState(() => ({ ok: params.get('oauth') === 'ok', error: params.get('oauth_error') }))
+  useEffect(() => {
+    if (params.has('oauth') || params.has('oauth_error')) setParams({}, { replace: true })
+  }, [params, setParams])
   const loginFailed = add.error instanceof ApiError && add.error.code === 'mail_login_failed'
   const date = (s: number) => new Date(s * 1000).toLocaleString(i18n.language, { dateStyle: 'medium', timeStyle: 'short' })
 
@@ -119,6 +130,7 @@ function AccountsTab() {
             <li key={a.id} className="flex flex-col gap-2 px-4 py-3">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <span className="font-semibold">{a.name}</span>
+                {a.auth !== 'password' && <span className="text-sm text-muted">{t('account.oauth.via', { provider: t(`account.oauth.${a.auth}`) })}</span>}
                 <span className={`rounded px-2 py-0.5 text-xs font-semibold bg-surface-2 ${a.state === 'error' ? 'text-crit' : a.state === 'idle' ? 'text-good' : 'text-muted'}`}>
                   {t(`account.states.${a.state}`)}
                 </span>
@@ -128,6 +140,11 @@ function AccountsTab() {
               {a.state === 'error' && a.sync_error && <Alert>{a.sync_error}</Alert>}
               <div className="flex flex-wrap gap-2">
                 <button className="btn" disabled={sync.isPending} onClick={() => sync.mutate(a.id)}>{t('account.syncNow')}</button>
+                {a.auth !== 'password' && a.state === 'error' && (
+                  <button className="btn" disabled={connect.isPending} onClick={() => connect.mutate({ provider: a.auth as OAuthProvider, hint: a.email })}>
+                    {t('account.oauth.reconnect')}
+                  </button>
+                )}
                 <button className="btn btn-ghost text-crit" disabled={remove.isPending}
                   onClick={() => { if (window.confirm(t('account.deleteConfirm', { name: a.name }))) remove.mutate(a.id) }}>
                   {t('account.delete')}
@@ -136,6 +153,22 @@ function AccountsTab() {
             </li>
           ))}
         </ul>
+      )}
+      {back.ok && <Alert kind="ok">{t('account.oauth.connected')}</Alert>}
+      {back.error && <Alert>{back.error}</Alert>}
+      {connect.isError && <Alert>{connect.error instanceof ApiError ? connect.error.message : t('common.error')}</Alert>}
+      {(providers.data?.providers.length ?? 0) > 0 && (
+        <div className="card flex flex-col gap-3 p-4 sm:p-6">
+          <h2 className="text-lg font-bold">{t('account.oauth.title')}</h2>
+          <p className="text-muted">{t('account.oauth.body')}</p>
+          <div className="flex flex-wrap gap-2">
+            {providers.data!.providers.map((p) => (
+              <button key={p} className="btn" disabled={connect.isPending} onClick={() => connect.mutate({ provider: p })}>
+                {t('account.oauth.connect', { provider: t(`account.oauth.${p}`) })}
+              </button>
+            ))}
+          </div>
+        </div>
       )}
       <form className="card flex flex-col gap-5 p-4 sm:p-6" onSubmit={(e) => { e.preventDefault(); add.mutate(true) }}>
         <h2 className="text-lg font-bold">{t('account.add')}</h2>
