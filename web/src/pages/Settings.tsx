@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { Link, NavLink, useParams, useSearchParams } from 'react-router'
@@ -14,6 +14,7 @@ import { LabelsAndRules } from '../components/LabelsAndRules'
 import { ApiPanel } from '../components/ApiPanel'
 import { MailPrefs } from '../components/MailPrefs'
 import { manualUrl } from '../lib/manual'
+import { Icon } from '../components/mail/Icons'
 
 const TABS = ['look', 'security', 'accounts', 'identities', 'labels', 'api', 'invitations'] as const
 type Tab = (typeof TABS)[number]
@@ -28,20 +29,16 @@ export default function Settings({ me }: { me: Me }) {
     <div className="mx-auto flex min-h-full max-w-3xl flex-col gap-6 px-4 py-6 sm:py-10">
       <div className="flex items-center justify-between gap-4">
         <Logo />
-        <div className="flex gap-1">
-          <a href={manualUrl(i18n.language, 'settings')} target="_blank" rel="noopener" className="btn btn-ghost">{t('home.manual')}</a>
-          <Link to="/" className="btn btn-ghost">{t('settings.back')}</Link>
+        <div className="flex shrink-0 gap-1">
+          <a href={manualUrl(i18n.language, 'settings')} target="_blank" rel="noopener" className="btn btn-ghost whitespace-nowrap"
+            aria-label={t('home.manual')} title={t('home.manual')}>
+            <Icon name="help" className="sm:hidden" /><span className="hidden sm:inline">{t('home.manual')}</span>
+          </a>
+          <Link to="/" className="btn btn-ghost whitespace-nowrap">{t('settings.back')}</Link>
         </div>
       </div>
       <h1 className="text-3xl font-bold">{t('settings.title')}</h1>
-      <nav className="-mx-4 flex gap-1 overflow-x-auto border-b border-line px-4">
-        {tabs.map((x) => (
-          <NavLink key={x} to={`/settings/${x}`}
-            className={`whitespace-nowrap border-b-2 px-3 py-2 ${current === x ? 'border-accent font-semibold' : 'border-transparent text-muted'}`}>
-            {t(`settings.tabs.${x}`)}
-          </NavLink>
-        ))}
-      </nav>
+      <SettingsTabs tabs={tabs} current={current} />
       {current === 'look' && <LookTab me={me} />}
       {current === 'security' && <SecurityTab me={me} />}
       {current === 'accounts' && <AccountsTab />}
@@ -49,6 +46,53 @@ export default function Settings({ me }: { me: Me }) {
       {current === 'labels' && <LabelsAndRules />}
       {current === 'api' && <ApiPanel />}
       {current === 'invitations' && me.is_admin && <InvitationsTab />}
+    </div>
+  )
+}
+
+/** Pestañas en una fila que se desliza con el dedo o la rueda, sin barra de desplazamiento. */
+function SettingsTabs({ tabs, current }: { tabs: Tab[]; current: Tab }) {
+  const { t } = useTranslation()
+  const ref = useRef<HTMLElement>(null)
+  const [more, setMore] = useState<'none' | 'left' | 'right' | 'both'>('none')
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const update = () => {
+      const left = el.scrollLeft > 1
+      const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 1
+      setMore(left && right ? 'both' : left ? 'left' : right ? 'right' : 'none')
+    }
+    update()
+    el.addEventListener('scroll', update, { passive: true })
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => {
+      el.removeEventListener('scroll', update)
+      ro.disconnect()
+    }
+  }, [])
+
+  // La pestaña abierta siempre a la vista, aunque se llegue por un enlace.
+  useEffect(() => {
+    ref.current?.querySelector<HTMLElement>('[aria-current="page"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [current])
+
+  return (
+    <div className="-mx-4 border-b border-line px-4">
+      <nav ref={ref} data-more={more} className="tabs-scroll flex gap-1 overflow-x-auto"
+        onWheel={(e) => {
+          // La rueda vertical también desliza las pestañas.
+          if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) e.currentTarget.scrollLeft += e.deltaY
+        }}>
+        {tabs.map((x) => (
+          <NavLink key={x} to={`/settings/${x}`}
+            className={`whitespace-nowrap border-b-2 px-3 py-2 ${current === x ? 'border-accent font-semibold' : 'border-transparent text-muted'}`}>
+            {t(`settings.tabs.${x}`)}
+          </NavLink>
+        ))}
+      </nav>
     </div>
   )
 }
