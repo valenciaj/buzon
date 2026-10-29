@@ -1,0 +1,19 @@
+[Unit]
+Description=Copia de seguridad de Buzón
+After=buzon.service
+
+[Service]
+Type=oneshot
+User=buzon
+Group=buzon
+UMask=0077
+ExecStart=/usr/local/bin/buzon --config /etc/buzon/config.toml backup /var/backups/buzon --keep 7
+Nice=10
+IOSchedulingClass=idle
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/buzon /var/backups/buzon
+ReadOnlyPaths=/etc/buzon

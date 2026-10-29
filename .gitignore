@@ -6,3 +6,5 @@ node_modules
 *.db-shm
 *.db-wal
 *.tsbuildinfo
+/dist
+docs/manual/.vitepress/cache

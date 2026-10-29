@@ -13,12 +13,13 @@ import { AccountForm, EMPTY_ACCOUNT } from '../components/AccountForm'
 import { LabelsAndRules } from '../components/LabelsAndRules'
 import { ApiPanel } from '../components/ApiPanel'
 import { MailPrefs } from '../components/MailPrefs'
+import { manualUrl } from '../lib/manual'
 
 const TABS = ['look', 'security', 'accounts', 'identities', 'labels', 'api', 'invitations'] as const
 type Tab = (typeof TABS)[number]
 
 export default function Settings({ me }: { me: Me }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { tab = 'look' } = useParams()
   const tabs = TABS.filter((x) => x !== 'invitations' || me.is_admin)
   const current: Tab = (tabs as readonly string[]).includes(tab) ? (tab as Tab) : 'look'
@@ -27,7 +28,10 @@ export default function Settings({ me }: { me: Me }) {
     <div className="mx-auto flex min-h-full max-w-3xl flex-col gap-6 px-4 py-6 sm:py-10">
       <div className="flex items-center justify-between gap-4">
         <Logo />
-        <Link to="/" className="btn btn-ghost">{t('settings.back')}</Link>
+        <div className="flex gap-1">
+          <a href={manualUrl(i18n.language, 'settings')} target="_blank" rel="noopener" className="btn btn-ghost">{t('home.manual')}</a>
+          <Link to="/" className="btn btn-ghost">{t('settings.back')}</Link>
+        </div>
       </div>
       <h1 className="text-3xl font-bold">{t('settings.title')}</h1>
       <nav className="-mx-4 flex gap-1 overflow-x-auto border-b border-line px-4">

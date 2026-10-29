@@ -19,6 +19,7 @@ import { Shortcuts } from '../components/mail/Shortcuts'
 import { DraftList } from '../components/compose/DraftList'
 import { ComposerProvider, useCompose } from '../components/compose/ComposerProvider'
 import { emptyCompose, pickIdentity } from '../lib/compose'
+import { manualUrl } from '../lib/manual'
 
 const ACTION_ICONS: Record<MailAction, string> = { archive: 'archive', inbox: 'inbox', trash: 'trash', junk: 'junk', delete: 'trash' }
 
@@ -48,7 +49,7 @@ export default function Home({ me }: { me: Me }) {
 }
 
 function Mail({ me }: { me: Me }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const compose = useCompose()
   const identities = useQuery({ queryKey: ['identities'], queryFn: api.identities })
   const drafts = useQuery({ queryKey: ['drafts'], queryFn: api.drafts })
@@ -347,6 +348,7 @@ function Mail({ me }: { me: Me }) {
       }
     }
     out.push({ id: 'shortcuts', label: t('shortcuts.title'), icon: 'keyboard', group: act, hint: '?', run: () => setHelp(true) })
+    out.push({ id: 'manual', label: t('home.manual'), icon: 'help', group: act, keywords: 'ayuda help manual', run: () => window.open(manualUrl(i18n.language), '_blank', 'noopener') })
 
     const other = focus ? 'classic' : 'focus'
     out.push({ id: 'mode', label: t('palette.mode', { mode: t(`look.modes.${other}`) }), icon: 'sliders', group: prefs, run: () => setPref({ mode: other }) })

@@ -157,7 +157,9 @@
     "settings": "Ajustes",
     "logout": "Cerrar sesión",
     "menu": "Menú",
-    "contacts": "Contactos"
+    "contacts": "Contactos",
+    "manual": "Manual de ayuda",
+    "manualMore": "Más en el manual de ayuda"
   },
   "settings": {
     "title": "Ajustes",

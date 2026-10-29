@@ -6,6 +6,7 @@ import { api, type Account, type Mailbox, type Me, type Role, type View } from '
 import { ACCOUNT_COLORS, boxKey, customFolders, ROLE_ORDER, unreadByRole, type Box } from '../../lib/mail'
 import { Logo } from '../ui'
 import { Icon } from './Icons'
+import { manualUrl } from '../../lib/manual'
 
 /** En Enfoque, la entrada se reparte en bandejas y pilas; el resto queda en «Más carpetas». */
 const FOCUS_MAIN: Role[] = ['sent', 'drafts']
@@ -28,7 +29,7 @@ export function Sidebar({ me, accounts, mailboxes, account, box, onAccount, onBo
   onLogout: () => void
   onCompose?: () => void
 }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const focus = me.preferences.mode === 'focus'
   const [more, setMore] = useState(false)
   const labels = useQuery({ queryKey: ['labels'], queryFn: api.labels })
@@ -174,6 +175,9 @@ export function Sidebar({ me, accounts, mailboxes, account, box, onAccount, onBo
         <Link to="/contacts" className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-surface">
           <Icon name="contacts" className="shrink-0 text-muted" /> {t('home.contacts')}
         </Link>
+        <a href={manualUrl(i18n.language)} target="_blank" rel="noopener" className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-surface">
+          <Icon name="help" className="shrink-0 text-muted" /> {t('home.manual')}
+        </a>
         <Link to="/settings" className="rounded-lg px-3 py-2 hover:bg-surface">{t('home.settings')}</Link>
         <button onClick={onLogout} className="rounded-lg px-3 py-2 text-left hover:bg-surface">{t('home.logout')}</button>
       </div>

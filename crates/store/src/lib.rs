@@ -2,6 +2,7 @@
 //! y una base de datos SQLite por usuario (`users/<id>.db`).
 
 pub mod app;
+pub mod backup;
 pub mod compose;
 pub mod crypto;
 pub mod extras;
