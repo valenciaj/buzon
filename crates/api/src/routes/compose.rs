@@ -220,6 +220,7 @@ fn draft_from(req: DraftIn, id: Option<Id>) -> Draft {
         reply_to: req.reply_to,
         forward_of: req.forward_of,
         attachments: req.attachments,
+        read_receipt: req.read_receipt,
         ..Default::default()
     }
 }
@@ -237,6 +238,7 @@ pub(crate) fn draft_in(d: Draft) -> DraftIn {
         reply_to: d.reply_to,
         forward_of: d.forward_of,
         attachments: d.attachments,
+        read_receipt: d.read_receipt,
     }
 }
 
@@ -263,6 +265,7 @@ pub(crate) async fn draft_out(udb: &UserDb, d: Draft) -> ApiResult<DraftOut> {
         send_at: d.send_at,
         send_error: d.send_error,
         follow_up_days: d.follow_up_days,
+        read_receipt: d.read_receipt,
     })
 }
 
@@ -615,6 +618,7 @@ async fn outgoing(
         in_reply_to,
         references,
         attachments,
+        read_receipt: m.read_receipt,
     };
     Ok((o, replied))
 }

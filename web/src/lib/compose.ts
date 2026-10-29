@@ -16,6 +16,8 @@ export interface ComposeState {
   uploads: Upload[]
   /** Adjuntos del original que van en el reenvío. */
   forwarded: AttachmentInfo[]
+  /** Pedir confirmación de lectura. */
+  readReceipt: boolean
 }
 
 export function emptyCompose(identity?: Identity, to: Addr[] = []): ComposeState {
@@ -31,6 +33,7 @@ export function emptyCompose(identity?: Identity, to: Addr[] = []): ComposeState
     forwardOf: null,
     uploads: [],
     forwarded: [],
+    readReceipt: false,
   }
 }
 
@@ -47,6 +50,7 @@ export function fromDraft(d: Draft): ComposeState {
     forwardOf: d.forward_of,
     uploads: d.attachments,
     forwarded: [],
+    readReceipt: d.read_receipt,
   }
 }
 
@@ -62,6 +66,7 @@ export function toDraftInput(s: ComposeState, text: string): DraftInput {
     reply_to: s.replyTo,
     forward_of: s.forwardOf,
     attachments: s.uploads.map((u) => u.id),
+    read_receipt: s.readReceipt,
   }
 }
 

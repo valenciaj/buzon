@@ -174,9 +174,6 @@ export function Sidebar({ me, accounts, mailboxes, account, box, onAccount, onBo
             <Icon name="sync" className="shrink-0 motion-safe:animate-spin" /> {t('mail.syncing')}
           </p>
         )}
-        <p className="px-3 text-sm text-muted">
-          {t(`look.modes.${me.preferences.mode}`)} · {me.username}
-        </p>
         <Link to="/contacts" className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-surface">
           <Icon name="contacts" className="shrink-0 text-muted" /> {t('home.contacts')}
         </Link>

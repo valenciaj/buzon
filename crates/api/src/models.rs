@@ -575,6 +575,9 @@ pub struct DraftIn {
     #[serde(default)]
     #[schema(value_type = Vec<String>)]
     pub attachments: Vec<Id>,
+    /// Pedir confirmación de lectura (`Disposition-Notification-To`).
+    #[serde(default)]
+    pub read_receipt: bool,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -620,6 +623,7 @@ pub struct DraftOut {
     /// Por qué falló el último envío programado.
     pub send_error: Option<String>,
     pub follow_up_days: Option<i64>,
+    pub read_receipt: bool,
 }
 
 #[derive(Deserialize, ToSchema)]

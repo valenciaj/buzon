@@ -323,7 +323,9 @@
     "followUpOff": "No avisar",
     "sendFailed": "No salió: {{error}}",
     "hideCc": "Quitar Cc",
-    "hideBcc": "Quitar Cco"
+    "hideBcc": "Quitar Cco",
+    "readReceipt": "Pedir confirmación de lectura",
+    "readReceiptOn": "Se pedirá confirmación de lectura"
   },
   "identity": {
     "intro": "Las direcciones desde las que escribes: la de cada cuenta y sus alias. Cada una puede tener su firma.",

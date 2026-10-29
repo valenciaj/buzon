@@ -37,6 +37,8 @@ pub struct Draft {
     pub send_error: Option<String>,
     /// Avisar si nadie responde en estos días.
     pub follow_up_days: Option<i64>,
+    /// Pedir confirmación de lectura.
+    pub read_receipt: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,6 +99,7 @@ fn draft_from_row(r: &sqlx::sqlite::SqliteRow) -> Result<Draft> {
         send_at: r.try_get("send_at")?,
         send_error: r.try_get("send_error")?,
         follow_up_days: r.try_get("follow_up_days")?,
+        read_receipt: r.try_get("read_receipt")?,
     })
 }
 
@@ -208,11 +211,11 @@ impl UserDb {
         let t = now();
         sqlx::query(
             "INSERT INTO drafts (id, identity_id, to_json, cc_json, bcc_json, subject, html, text, reply_to, forward_of, \
-             attachments, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET \
+             attachments, read_receipt, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET \
              identity_id = excluded.identity_id, to_json = excluded.to_json, cc_json = excluded.cc_json, \
              bcc_json = excluded.bcc_json, subject = excluded.subject, html = excluded.html, text = excluded.text, \
              reply_to = excluded.reply_to, forward_of = excluded.forward_of, attachments = excluded.attachments, \
-             updated_at = excluded.updated_at",
+             read_receipt = excluded.read_receipt, updated_at = excluded.updated_at",
         )
         .bind(b(id))
         .bind(d.identity_id.map(b))
@@ -225,6 +228,7 @@ impl UserDb {
         .bind(d.reply_to.map(b))
         .bind(d.forward_of.map(b))
         .bind(to_json(&d.attachments))
+        .bind(d.read_receipt)
         .bind(t)
         .execute(&self.pool)
         .await?;

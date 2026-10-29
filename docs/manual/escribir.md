@@ -5,7 +5,7 @@
 Pulsa el botón redondo del lápiz **Redactar**, junto al logo o abajo a la derecha (o <kbd>c</kbd>). Se abre una ventana con:
 
 - **De:** la dirección desde la que envías, si tienes varias cuentas o identidades.
-- **Para, Cc y Cco:** escribe un nombre o una dirección; Buzón te sugiere tus contactos. Pulsa <kbd>Intro</kbd> o la coma para añadirla.
+- **Para, Cc y Cco:** escribe un nombre o una dirección; Buzón te sugiere tus contactos. Pulsa <kbd>Intro</kbd> o la coma para añadirla. Cc y Cco se pliegan con su ×.
 - **Asunto** y **mensaje**, con negrita, cursiva, listas, citas y enlaces.
 
 ![Redactar un correo](/img/es/redactar.png)
@@ -31,6 +31,10 @@ Pulsa el reloj junto a **Enviar** y elige cuándo debe salir: esta tarde, mañan
 ## Avisarme si no responden
 
 Pulsa la campana junto a **Enviar** y elige en cuántos días (1, 3, 7 o 14). Si nadie te contesta en ese tiempo, la conversación aparece en **Sin respuesta**. Si te responden antes, el aviso desaparece solo.
+
+## Confirmación de lectura
+
+Pulsa el doble visto junto a **Enviar** para pedir al destinatario que confirme que ha leído el correo; el botón se queda en azul. Su programa de correo decide si le pregunta y si te la manda: muchos no lo hacen. Si llega, la verás como un correo más.
 
 ## Firmas e identidades
 

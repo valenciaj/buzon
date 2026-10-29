@@ -84,6 +84,11 @@ function Today({ me, account, onMenu, onBox, onOpen }: {
     <>
       <Header title={t('today.title')} intro={today.charAt(0).toUpperCase() + today.slice(1)} onMenu={onMenu} />
       <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-[var(--pad)] py-4">
+        {nothing && (
+          <p role="status" className="flex items-center gap-2 font-semibold text-good">
+            <Icon name="check" className="shrink-0" /> {t('today.allClear')}
+          </p>
+        )}
         <ul className="grid grid-cols-2 gap-2" aria-label={t('today.title')}>
           {tiles.map((x) => (
             <li key={x.key}>
@@ -95,7 +100,6 @@ function Today({ me, account, onMenu, onBox, onOpen }: {
             </li>
           ))}
         </ul>
-        {nothing && <Alert kind="ok">{t('today.allClear')}</Alert>}
         {(due.data?.length ?? 0) > 0 && (
           <section className="flex flex-col gap-1">
             <h2 className="eyebrow">{t('today.noReply')}</h2>
