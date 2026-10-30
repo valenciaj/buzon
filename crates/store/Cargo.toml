@@ -3,6 +3,8 @@ name = "buzon-store"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+publish.workspace = true
 
 [dependencies]
 argon2.workspace = true
