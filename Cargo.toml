@@ -8,7 +8,7 @@ edition = "2021"
 license = "MIT"
 repository = "https://github.com/valenciaj/buzon"
 publish = false
-rust-version = "1.85"
+rust-version = "1.88"
 
 [workspace.dependencies]
 ammonia = "4"
