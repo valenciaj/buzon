@@ -411,7 +411,7 @@ impl Search {
     }
 
     /// Añade las condiciones sobre el mensaje `m` (y su carpeta `mb`) a una consulta.
-    pub(crate) fn push_conditions(&self, s: &mut QueryBuilder<'_, Sqlite>) {
+    pub(crate) fn push_conditions(&self, s: &mut QueryBuilder<Sqlite>) {
         if let Some(t) = &self.text {
             s.push(" AND m.rowid IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ")
                 .push_bind(t.clone())

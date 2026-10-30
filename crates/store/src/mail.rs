@@ -824,7 +824,7 @@ pub struct ThreadChanges {
     pub flagged: Vec<ImapTarget>,
 }
 
-async fn targets(tx: &mut SqliteConnection, sql: &str, v: bool, thread: Id) -> Result<Vec<ImapTarget>> {
+async fn targets(tx: &mut SqliteConnection, sql: &'static str, v: bool, thread: Id) -> Result<Vec<ImapTarget>> {
     let rows = sqlx::query(sql)
         .bind(v)
         .bind(b(thread))

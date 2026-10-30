@@ -2,7 +2,7 @@ use std::path::Path;
 use std::str::FromStr;
 
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteRow};
-use sqlx::{Row, SqlitePool};
+use sqlx::{AssertSqlSafe, Row, SqlitePool};
 
 use crate::{map_unique, now, Id, Result};
 
@@ -154,7 +154,7 @@ impl AppDb {
     }
 
     pub async fn user_by_id(&self, id: Id) -> Result<Option<User>> {
-        let row = sqlx::query(&format!("SELECT {USER_COLS} FROM users WHERE id = ?"))
+        let row = sqlx::query(AssertSqlSafe(format!("SELECT {USER_COLS} FROM users WHERE id = ?")))
             .bind(id.as_bytes().as_slice())
             .fetch_optional(&self.pool)
             .await?;
@@ -162,10 +162,12 @@ impl AppDb {
     }
 
     pub async fn user_by_username(&self, username: &str) -> Result<Option<User>> {
-        let row = sqlx::query(&format!("SELECT {USER_COLS} FROM users WHERE username = ?"))
-            .bind(username)
-            .fetch_optional(&self.pool)
-            .await?;
+        let row = sqlx::query(AssertSqlSafe(format!(
+            "SELECT {USER_COLS} FROM users WHERE username = ?"
+        )))
+        .bind(username)
+        .fetch_optional(&self.pool)
+        .await?;
         row.as_ref().map(user_from_row).transpose()
     }
 
@@ -235,10 +237,10 @@ impl AppDb {
             .map(|c| format!("u.{}", c.trim()))
             .collect::<Vec<_>>()
             .join(", ");
-        let row = sqlx::query(&format!(
+        let row = sqlx::query(AssertSqlSafe(format!(
             "SELECT {cols} FROM sessions s JOIN users u ON u.id = s.user_id \
              WHERE s.token_hash = ? AND s.expires_at > ?"
-        ))
+        )))
         .bind(token_hash)
         .bind(now())
         .fetch_optional(&self.pool)

@@ -50,7 +50,7 @@ impl View {
     }
 
     /// Añade a la consulta de hilos (alias `t`) las condiciones de esta vista.
-    pub(crate) fn push_conditions(self, s: &mut QueryBuilder<'_, Sqlite>, now: i64) {
+    pub(crate) fn push_conditions(self, s: &mut QueryBuilder<Sqlite>, now: i64) {
         // Dónde va el hilo según quién escribió lo último que hay en la entrada:
         // su bandeja si está aprobado (o no se sabe nada de él), o `pending`/`blocked`.
         // Sin nada en la entrada, NULL.
