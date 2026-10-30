@@ -1,5 +1,6 @@
 //! Análisis de mensajes MIME y saneado del HTML para el lector.
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
@@ -7,7 +8,7 @@ use std::sync::Arc;
 use buzon_store::flow::guess_kind;
 use buzon_store::mail::{Addr, Attachment, Flags, NewMessage};
 use buzon_store::Id;
-use mail_parser::{Address, HeaderValue, MessageParser, MimeHeaders};
+use mail_parser::{AddressList, Message, MessageParser, MessagePart, PartKind, TextList};
 
 /// URL de un adjunto dentro de la API (también para las imágenes `cid:`).
 pub fn attachment_url(message: Id, index: u32) -> String {
@@ -26,9 +27,9 @@ pub struct Envelope {
     pub fallback_date: i64,
 }
 
-fn addrs(a: Option<&Address<'_>>) -> Vec<Addr> {
+fn addrs(a: Option<AddressList<'_>>) -> Vec<Addr> {
     a.map(|a| {
-        a.iter()
+        a.mailboxes()
             .filter_map(|x| {
                 Some(Addr {
                     name: x.name().map(str::trim).filter(|n| !n.is_empty()).map(String::from),
@@ -40,11 +41,29 @@ fn addrs(a: Option<&Address<'_>>) -> Vec<Addr> {
     .unwrap_or_default()
 }
 
-fn id_list(v: &HeaderValue<'_>) -> Vec<String> {
-    match v {
-        HeaderValue::Text(t) => vec![t.to_string()],
-        HeaderValue::TextList(l) => l.iter().map(|t| t.to_string()).collect(),
-        _ => Vec::new(),
+fn id_list(v: Option<TextList<'_>>) -> Vec<String> {
+    v.map(|l| l.iter().map(String::from).collect()).unwrap_or_default()
+}
+
+/// Adjuntos como en mail-parser 0.11: las partes que no son texto (aunque se muestren
+/// en el cuerpo) y el texto que no forma parte del cuerpo. Los índices ya guardados
+/// tienen que seguir valiendo.
+fn attachments<'m>(msg: &'m Message<'_>) -> impl Iterator<Item = MessagePart<'m>> {
+    msg.root().parts().filter(|p| match p.kind() {
+        PartKind::Text => !p.in_text_body(),
+        PartKind::Html => !p.in_html_body(),
+        PartKind::Multipart => p.is_attachment(),
+        _ => true,
+    })
+}
+
+/// Contenido de una parte: el texto ya convertido a UTF-8, o los bytes decodificados.
+fn contents<'m>(part: &MessagePart<'m>) -> Cow<'m, [u8]> {
+    match part.text() {
+        Some(Cow::Borrowed(t)) => Cow::Borrowed(t.as_bytes()),
+        Some(Cow::Owned(t)) => Cow::Owned(t.into_bytes()),
+        None if part.is_multipart() => Cow::Borrowed(&[]),
+        None => part.decoded(),
     }
 }
 
@@ -106,15 +125,17 @@ pub fn parse(raw: &[u8], env: Envelope) -> NewMessage {
     if let Some(d) = msg.date() {
         m.date = d.to_timestamp();
     }
-    let list = msg.header_raw("List-Unsubscribe").is_some() || msg.header_raw("List-Id").is_some();
-    let bulk = msg
-        .header_raw("Precedence")
+    let headers = msg.headers();
+    let list = headers.contains("List-Unsubscribe") || headers.contains("List-Id");
+    let bulk = headers
+        .get("Precedence")
+        .and_then(|h| std::str::from_utf8(h.raw_value()).ok())
         .is_some_and(|p| matches!(p.trim().to_ascii_lowercase().as_str(), "bulk" | "list" | "junk"));
     let from_email = m.from.as_ref().map(|a| a.email.as_str()).unwrap_or("");
     m.kind = guess_kind(list, bulk, from_email, &m.subject).into();
 
     let mut cids = HashMap::new();
-    for (i, part) in msg.attachments().enumerate() {
+    for (i, part) in attachments(&msg).enumerate() {
         let ct = part
             .content_type()
             .map(|c| match c.subtype() {
@@ -136,13 +157,13 @@ pub fn parse(raw: &[u8], env: Envelope) -> NewMessage {
                 .map(String::from)
                 .unwrap_or_else(|| format!("adjunto-{}", i + 1)),
             content_type: ct,
-            size: part.contents().len() as u64,
+            size: contents(&part).len() as u64,
             content_id,
             inline: false,
         });
     }
 
-    let has_html = msg.html_bodies().any(|p| p.is_content_type("text", "html"));
+    let has_html = msg.html_body().any(|p| p.is_content_type("text", "html"));
     if has_html {
         if let Some(html) = msg.body_html(0) {
             let (html, trackers) = strip_trackers(&html);
@@ -165,8 +186,8 @@ pub fn parse(raw: &[u8], env: Envelope) -> NewMessage {
 /// Contenido de un adjunto del mensaje original, por su posición.
 pub fn attachment(raw: &[u8], index: u32) -> Option<Vec<u8>> {
     let msg = MessageParser::default().parse(raw)?;
-    let part = msg.attachments().nth(index as usize)?;
-    Some(part.contents().to_vec())
+    let part = attachments(&msg).nth(index as usize)?;
+    Some(contents(&part).into_owned())
 }
 
 /// Servicios conocidos de seguimiento de aperturas.
@@ -511,6 +532,16 @@ JVBERi0xLjQK\r
         assert!(html.contains("target=\"_blank\""));
         assert!(html.contains("rel=\"noopener noreferrer\""));
         assert_eq!(m.remote_images, 2);
+    }
+
+    #[test]
+    fn inline_images_are_still_attachments() {
+        let raw = b"From: a@b.es\r\nContent-Type: multipart/mixed; boundary=M\r\n\r\n--M\r\n\
+Content-Type: text/plain\r\n\r\nHola\r\n--M\r\nContent-Type: image/png\r\n\r\nPNG\r\n--M--\r\n";
+        let m = parse(raw, env());
+        assert_eq!(m.attachments.len(), 1);
+        assert_eq!(m.attachments[0].content_type, "image/png");
+        assert_eq!(attachment(raw, 0).unwrap(), b"PNG");
     }
 
     #[test]
