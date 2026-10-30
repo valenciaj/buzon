@@ -1,7 +1,7 @@
 //! Seguimiento de respuestas: correos enviados que esperan contestación.
 
 use serde::Serialize;
-use sqlx::Row;
+use sqlx::{AssertSqlSafe, Row};
 
 use crate::mail::{b, id_of, Addr};
 use crate::{now, Id, Result, UserDb};
@@ -57,9 +57,9 @@ impl UserDb {
     /// Los que ya tienen respuesta se cierran solos.
     pub async fn followups(&self, due_only: bool) -> Result<Vec<FollowUp>> {
         let t = now();
-        sqlx::query(&format!(
+        sqlx::query(AssertSqlSafe(format!(
             "UPDATE followups AS f SET dismissed_at = ? WHERE dismissed_at IS NULL AND {ANSWERED}"
-        ))
+        )))
         .bind(t)
         .execute(&self.pool)
         .await?;

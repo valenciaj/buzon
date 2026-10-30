@@ -2,7 +2,7 @@
 //! Los envíos van a una cola persistente y se reintentan durante casi 24 horas.
 
 use sqlx::sqlite::SqliteRow;
-use sqlx::Row;
+use sqlx::{AssertSqlSafe, Row};
 
 use crate::{now, AppDb, Id, Result};
 
@@ -143,15 +143,17 @@ impl AppDb {
     }
 
     pub async fn webhooks(&self, user: Id) -> Result<Vec<Webhook>> {
-        let rows = sqlx::query(&format!("{HOOK_SELECT} WHERE w.user_id = ? ORDER BY w.id"))
-            .bind(user.as_bytes().as_slice())
-            .fetch_all(&self.pool)
-            .await?;
+        let rows = sqlx::query(AssertSqlSafe(format!(
+            "{HOOK_SELECT} WHERE w.user_id = ? ORDER BY w.id"
+        )))
+        .bind(user.as_bytes().as_slice())
+        .fetch_all(&self.pool)
+        .await?;
         rows.iter().map(webhook_from_row).collect()
     }
 
     pub async fn webhook(&self, user: Id, id: Id) -> Result<Option<Webhook>> {
-        let row = sqlx::query(&format!("{HOOK_SELECT} WHERE w.id = ? AND w.user_id = ?"))
+        let row = sqlx::query(AssertSqlSafe(format!("{HOOK_SELECT} WHERE w.id = ? AND w.user_id = ?")))
             .bind(id.as_bytes().as_slice())
             .bind(user.as_bytes().as_slice())
             .fetch_optional(&self.pool)
@@ -238,7 +240,7 @@ impl AppDb {
         let mut out = Vec::with_capacity(rows.len());
         for r in &rows {
             let d = delivery_from_row(r)?;
-            let row = sqlx::query(&format!("{HOOK_SELECT} WHERE w.id = ?"))
+            let row = sqlx::query(AssertSqlSafe(format!("{HOOK_SELECT} WHERE w.id = ?")))
                 .bind(d.webhook_id.as_bytes().as_slice())
                 .fetch_one(&self.pool)
                 .await?;

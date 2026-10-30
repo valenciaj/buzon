@@ -1,7 +1,7 @@
 //! Tokens personales de la API: para scripts y otras apps, con permisos limitados.
 
 use sqlx::sqlite::SqliteRow;
-use sqlx::Row;
+use sqlx::{AssertSqlSafe, Row};
 
 use crate::app::{user_from_row, User, USER_COLS};
 use crate::{now, AppDb, Id, Result};
@@ -75,9 +75,9 @@ impl AppDb {
 
     /// Tokens vigentes del usuario (los revocados no se listan).
     pub async fn tokens(&self, user: Id) -> Result<Vec<ApiToken>> {
-        let rows = sqlx::query(&format!(
+        let rows = sqlx::query(AssertSqlSafe(format!(
             "SELECT {TOKEN_COLS} FROM api_tokens WHERE user_id = ? AND revoked_at IS NULL ORDER BY id DESC"
-        ))
+        )))
         .bind(user.as_bytes().as_slice())
         .fetch_all(&self.pool)
         .await?;
@@ -97,10 +97,10 @@ impl AppDb {
     /// Usuario y token de un token en vigor. Apunta cuándo se usó (como mucho una vez por minuto).
     pub async fn token_user(&self, token_hash: &str) -> Result<Option<(User, ApiToken)>> {
         let t = now();
-        let row = sqlx::query(&format!(
+        let row = sqlx::query(AssertSqlSafe(format!(
             "SELECT t.user_id, {TOKEN_COLS} FROM api_tokens t \
              WHERE t.token_hash = ? AND t.revoked_at IS NULL AND (t.expires_at IS NULL OR t.expires_at > ?)"
-        ))
+        )))
         .bind(token_hash)
         .bind(t)
         .fetch_optional(&self.pool)
@@ -108,7 +108,7 @@ impl AppDb {
         let Some(row) = row else { return Ok(None) };
         let token = token_from_row(&row)?;
         let user_id = Id::from_slice(row.try_get::<&[u8], _>("user_id")?)?;
-        let user = sqlx::query(&format!("SELECT {USER_COLS} FROM users WHERE id = ?"))
+        let user = sqlx::query(AssertSqlSafe(format!("SELECT {USER_COLS} FROM users WHERE id = ?")))
             .bind(user_id.as_bytes().as_slice())
             .fetch_optional(&self.pool)
             .await?;

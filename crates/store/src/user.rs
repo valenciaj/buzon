@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use sqlx::{Row, SqlitePool};
+use sqlx::{AssertSqlSafe, Row, SqlitePool};
 
 use crate::app::open_pool;
 use crate::crypto::SecretBox;
@@ -155,17 +155,21 @@ impl UserDb {
     }
 
     pub async fn accounts(&self) -> Result<Vec<Account>> {
-        let rows = sqlx::query(&format!("SELECT {ACCOUNT_COLS} FROM accounts ORDER BY id"))
-            .fetch_all(&self.pool)
-            .await?;
+        let rows = sqlx::query(AssertSqlSafe(format!(
+            "SELECT {ACCOUNT_COLS} FROM accounts ORDER BY id"
+        )))
+        .fetch_all(&self.pool)
+        .await?;
         rows.iter().map(account_from_row).collect()
     }
 
     pub async fn account(&self, id: Id) -> Result<Option<Account>> {
-        let row = sqlx::query(&format!("SELECT {ACCOUNT_COLS} FROM accounts WHERE id = ?"))
-            .bind(id.as_bytes().as_slice())
-            .fetch_optional(&self.pool)
-            .await?;
+        let row = sqlx::query(AssertSqlSafe(format!(
+            "SELECT {ACCOUNT_COLS} FROM accounts WHERE id = ?"
+        )))
+        .bind(id.as_bytes().as_slice())
+        .fetch_optional(&self.pool)
+        .await?;
         row.as_ref().map(account_from_row).transpose()
     }
 
@@ -177,7 +181,7 @@ impl UserDb {
             .fetch_all(&mut *tx)
             .await?;
         for table in ["messages", "threads", "mailboxes"] {
-            sqlx::query(&format!("DELETE FROM {table} WHERE account_id = ?"))
+            sqlx::query(AssertSqlSafe(format!("DELETE FROM {table} WHERE account_id = ?")))
                 .bind(id.as_bytes().as_slice())
                 .execute(&mut *tx)
                 .await?;
@@ -246,9 +250,9 @@ impl UserDb {
 
     /// Cuenta de OAuth2 ya conectada con esa dirección, para volver a conectarla en vez de duplicarla.
     pub async fn account_by_email(&self, auth: &str, email: &str) -> Result<Option<Account>> {
-        let row = sqlx::query(&format!(
+        let row = sqlx::query(AssertSqlSafe(format!(
             "SELECT {ACCOUNT_COLS} FROM accounts WHERE auth = ? AND lower(email) = lower(?)"
-        ))
+        )))
         .bind(auth)
         .bind(email)
         .fetch_optional(&self.pool)
