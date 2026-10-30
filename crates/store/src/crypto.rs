@@ -5,7 +5,7 @@ use argon2::Argon2;
 use chacha20poly1305::aead::{Aead, AeadCore, KeyInit};
 use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
 use hkdf::Hkdf;
-use rand::RngCore;
+use rand::TryRng;
 use sha2::{Digest, Sha256};
 use totp_rs::{Algorithm, Secret, TOTP};
 
@@ -28,7 +28,9 @@ pub fn verify_password(password: &str, hash: &str) -> bool {
 /// Token aleatorio de 32 bytes en Base58, para sesiones e invitaciones.
 pub fn random_token() -> String {
     let mut b = [0u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut b);
+    rand::rngs::SysRng
+        .try_fill_bytes(&mut b)
+        .expect("generador aleatorio del sistema");
     bs58::encode(b).into_string()
 }
 
@@ -44,7 +46,9 @@ pub struct MasterKey([u8; 32]);
 impl MasterKey {
     pub fn generate() -> Self {
         let mut b = [0u8; 32];
-        rand::rngs::OsRng.fill_bytes(&mut b);
+        rand::rngs::SysRng
+            .try_fill_bytes(&mut b)
+            .expect("generador aleatorio del sistema");
         MasterKey(b)
     }
 
