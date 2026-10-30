@@ -6,6 +6,8 @@ members = ["crates/store", "crates/sync", "crates/api", "crates/buzon"]
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+repository = "https://github.com/valenciaj/buzon"
+publish = false
 rust-version = "1.85"
 
 [workspace.dependencies]

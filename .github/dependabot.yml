@@ -1,0 +1,27 @@
+# Actualizaciones de dependencias: una PR al mes por ecosistema y carpeta con las versiones
+# menores y de parche. Las versiones mayores llegan en PRs separadas.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      cargo:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directories: [/web, /docs/manual]
+    schedule:
+      interval: monthly
+    groups:
+      npm:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        update-types: [minor, patch]
