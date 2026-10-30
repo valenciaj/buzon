@@ -148,6 +148,22 @@ mod tests {
     }
 
     #[test]
+    fn opens_secrets_sealed_by_earlier_versions() {
+        // Sellado con hkdf 0.12 y sha2 0.10: al actualizar dependencias, los secretos
+        // ya guardados tienen que seguir abriéndose y los hashes de tokens no deben cambiar.
+        let mk = MasterKey::from_hex(&"42".repeat(32)).unwrap();
+        let sealed = hex::decode(
+            "ee3aa0ea106b981fdd667379695115c6a399e65c8588cf5eb1425846e01f7c3493c60a02f18abdb16f13673737da701d09",
+        )
+        .unwrap();
+        assert_eq!(mk.derive("user:kat").open(&sealed).unwrap(), b"imap-pass");
+        assert_eq!(
+            token_hash("tok"),
+            "1a7674eb4ee78df7e1ac439a93c3fa8e3c945784d4dec9fd8e3011738b2f1d62"
+        );
+    }
+
+    #[test]
     fn totp_accepts_current_code() {
         let s = new_totp_secret();
         let t = totp(&s, "javier").unwrap();

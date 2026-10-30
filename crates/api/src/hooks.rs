@@ -8,7 +8,7 @@ use std::time::Duration;
 use buzon_store::hooks::{Attempt, Delivery, Webhook};
 use buzon_store::now;
 use buzon_sync::HookEvent;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use serde_json::json;
 use sha2::Sha256;
 use tokio::sync::broadcast::error::RecvError;
