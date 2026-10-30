@@ -22,8 +22,8 @@ bs58 = "0.5"
 chacha20poly1305 = "0.10"
 futures = "0.3"
 hex = "0.4"
-hkdf = "0.12"
-hmac = "0.12"
+hkdf = "0.13"
+hmac = "0.13"
 lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "tokio1-rustls-tls", "hostname"] }
 mail-parser = "0.11"
 rand = "0.10"
@@ -31,7 +31,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sha2 = "0.10"
+sha2 = "0.11"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
