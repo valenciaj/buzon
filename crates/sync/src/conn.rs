@@ -136,11 +136,15 @@ async fn wrap_tls(host: &str, tcp: TcpStream) -> Result<Box<dyn Io>> {
 
 /// Lee el saludo del servidor. Devuelve si anuncia AUTHENTICATE PLAIN (y no prohíbe entrar).
 async fn greeting<T: Io>(client: &mut async_imap::Client<T>) -> Result<bool> {
-    use async_imap::imap_proto::{Capability, Response, ResponseCode};
+    use async_imap::imap_proto::{Capability, Outcome, Response, ResponseCode};
     match client.read_response().await {
-        Some(Ok(r)) => Ok(match r.parsed() {
+        Ok(Some(r)) => Ok(match r.parsed() {
             Response::Data {
-                code: Some(ResponseCode::Capabilities(caps)),
+                outcome:
+                    Outcome {
+                        code: Some(ResponseCode::Capabilities(caps)),
+                        ..
+                    },
                 ..
             } => {
                 let has = |name: &str| {
@@ -156,8 +160,8 @@ async fn greeting<T: Io>(client: &mut async_imap::Client<T>) -> Result<bool> {
             }
             _ => false,
         }),
-        Some(Err(e)) => Err(e.into()),
-        None => Err(Error::Closed),
+        Err(e) => Err(e.into()),
+        Ok(None) => Err(Error::Closed),
     }
 }
 
@@ -232,8 +236,8 @@ fn login_error(e: &async_imap::error::Error) -> String {
     let raw = match e {
         async_imap::error::Error::No(s) | async_imap::error::Error::Bad(s) => s.clone(),
         other => {
-            // imap-proto no entiende respuestas con acentos (p. ej. «credenciales no válidas»):
-            // se saca el texto de la línea que no pudo leer.
+            // Si imap-proto no puede leer la respuesta (hasta la 0.16 pasaba con acentos,
+            // p. ej. «credenciales no válidas»), se saca el texto de la línea.
             let text = other.to_string();
             let Some(line) = text
                 .split_once("during parsing of \"")
