@@ -304,6 +304,7 @@ dependencies = [
  "axum",
  "buzon-store",
  "buzon-sync",
+ "futures",
  "hex",
  "hmac",
  "http-body-util",

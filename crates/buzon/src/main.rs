@@ -156,9 +156,29 @@ async fn main() -> anyhow::Result<()> {
         .await
         .with_context(|| format!("escuchando en {}", cfg.listen))?;
     tracing::info!("Buzón escuchando en http://{}", cfg.listen);
-    axum::serve(listener, app).with_graceful_shutdown(shutdown()).await?;
+    let st = state.clone();
+    let serve = axum::serve(listener, app).with_graceful_shutdown(async move {
+        shutdown().await;
+        tracing::info!("parando Buzón");
+        st.stop();
+    });
+    // Las peticiones en curso tienen un plazo para terminar; pasado, se cortan.
+    let deadline = async {
+        state.stopped().await;
+        tokio::time::sleep(STOP_GRACE).await;
+    };
+    tokio::select! {
+        r = std::future::IntoFuture::into_future(serve) => r?,
+        _ = deadline => tracing::warn!(
+            "quedaban conexiones abiertas a los {} s de empezar a parar; se cortan",
+            STOP_GRACE.as_secs()
+        ),
+    }
     Ok(())
 }
+
+/// Lo que se espera a las peticiones en curso al parar (systemd mata a los 90 s).
+const STOP_GRACE: std::time::Duration = std::time::Duration::from_secs(10);
 
 async fn shutdown() {
     let ctrl_c = async {
