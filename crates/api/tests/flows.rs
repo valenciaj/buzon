@@ -367,19 +367,17 @@ async fn totp_is_required_once_enabled() {
     let cookie = t.setup().await;
     let setup = t.call("POST", "/api/v1/me/totp/setup", Some(&cookie), None).await;
     assert_eq!(setup.status, StatusCode::OK);
-    let secret = totp_rs::Secret::Encoded(setup.body["secret"].as_str().unwrap().into())
-        .to_bytes()
+    // Como haría la app del móvil: solo con la semilla en base32 que da la API.
+    let secret = totp_rs::Secret::try_from_base32(setup.body["secret"].as_str().unwrap()).unwrap();
+    let totp = totp_rs::Builder::new()
+        .with_algorithm(totp_rs::Algorithm::SHA1)
+        .with_digits(6)
+        .with_step_duration(30)
+        .with_secret(secret)
+        .with_issuer(Some("Buzón"))
+        .with_account_name("javier")
+        .build()
         .unwrap();
-    let totp = totp_rs::TOTP::new(
-        totp_rs::Algorithm::SHA1,
-        6,
-        1,
-        30,
-        secret,
-        Some("Buzón".into()),
-        "javier".into(),
-    )
-    .unwrap();
 
     let bad = t
         .call(
@@ -395,7 +393,7 @@ async fn totp_is_required_once_enabled() {
             "POST",
             "/api/v1/me/totp/enable",
             Some(&cookie),
-            Some(json!({"code": totp.generate_current().unwrap()})),
+            Some(json!({"code": totp.generate_current().to_string()})),
         )
         .await;
     assert_eq!(ok.status, StatusCode::OK);
@@ -410,7 +408,7 @@ async fn totp_is_required_once_enabled() {
             "/api/v1/auth/login",
             None,
             Some(json!({
-                "username": "javier", "password": "una-contraseña-larga", "totp": totp.generate_current().unwrap()
+                "username": "javier", "password": "una-contraseña-larga", "totp": totp.generate_current().to_string()
             })),
         )
         .await;
