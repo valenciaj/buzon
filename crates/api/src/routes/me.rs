@@ -63,7 +63,7 @@ pub async fn totp_setup(State(st): State<Arc<AppState>>, cu: CurrentUser) -> Api
         .await?;
     Ok(Json(TotpSetup {
         secret: crypto::totp_secret_base32(&secret),
-        otpauth_url: totp.get_url(),
+        otpauth_url: crypto::totp_url(&totp)?,
     }))
 }
 

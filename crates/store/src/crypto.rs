@@ -7,7 +7,7 @@ use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
 use hkdf::Hkdf;
 use rand::TryRng;
 use sha2::{Digest, Sha256};
-use totp_rs::{Algorithm, Secret, TOTP};
+use totp_rs::{Algorithm, Builder, Secret, Totp};
 
 use crate::{Error, Result};
 
@@ -101,24 +101,36 @@ impl SecretBox {
 }
 
 pub fn new_totp_secret() -> Vec<u8> {
-    Secret::generate_secret().to_bytes().expect("secreto generado válido")
+    Secret::generate().as_bytes().to_vec()
 }
 
-pub fn totp(secret: &[u8], account: &str) -> Result<TOTP> {
-    TOTP::new(
-        Algorithm::SHA1,
-        6,
-        1,
-        30,
-        secret.to_vec(),
-        Some("Buzón".into()),
-        account.into(),
-    )
-    .map_err(|_| Error::Crypto("semilla TOTP no válida"))
+/// TOTP de la RFC 6238 con los parámetros de siempre (SHA-1, 6 dígitos, 30 s y
+/// un paso de margen): si cambian, dejan de valer las apps ya configuradas.
+pub fn totp(secret: &[u8], account: &str) -> Result<Totp> {
+    Builder::new()
+        .with_algorithm(Algorithm::SHA1)
+        .with_digits(6)
+        .with_skew(1)
+        .with_step_duration(30)
+        .with_secret(secret)
+        .with_issuer(Some("Buzón"))
+        .with_account_name(account)
+        .build()
+        .map_err(|_| Error::Crypto("semilla TOTP no válida"))
+}
+
+/// URL `otpauth://` para dar de alta la cuenta en la app (código QR).
+pub fn totp_url(totp: &Totp) -> Result<String> {
+    totp.to_url().map_err(|_| Error::Crypto("no se pudo crear la URL TOTP"))
+}
+
+/// `true` si el código vale ahora (con un paso de margen).
+pub fn totp_check_current(totp: &Totp, code: &str) -> bool {
+    totp.check_current(code).is_some()
 }
 
 pub fn totp_secret_base32(secret: &[u8]) -> String {
-    Secret::Raw(secret.to_vec()).to_encoded().to_string()
+    Secret::from(secret).to_base32()
 }
 
 #[cfg(test)]
@@ -166,8 +178,31 @@ mod tests {
     #[test]
     fn totp_accepts_current_code() {
         let s = new_totp_secret();
+        assert_eq!(s.len(), 20);
         let t = totp(&s, "javier").unwrap();
-        let code = t.generate_current().unwrap();
-        assert!(t.check_current(&code).unwrap());
+        let code = t.generate_current().to_string();
+        assert!(totp_check_current(&t, &code));
+    }
+
+    /// Lo que ve quien ya tiene el TOTP en el móvil (semilla en base32, URL del QR
+    /// y códigos) tiene que salir igual que con totp-rs 5.7. Valores sacados de
+    /// esa versión con la semilla de los vectores de prueba de la RFC 6238.
+    #[test]
+    fn totp_matches_previous_version() {
+        let s = b"12345678901234567890";
+        let t = totp(s, "javier").unwrap();
+        assert_eq!(totp_secret_base32(s), "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ");
+        assert_eq!(totp_secret_base32(b"0123456789"), "GAYTEMZUGU3DOOBZ");
+        assert_eq!(
+            totp_url(&t).unwrap(),
+            "otpauth://totp/Buz%C3%B3n:javier?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&issuer=Buz%C3%B3n"
+        );
+        // RFC 6238, apéndice B (SHA-1), con 6 dígitos.
+        assert_eq!(t.generate(59).to_string(), "287082");
+        assert_eq!(t.generate(1111111109).to_string(), "081804");
+        // Un paso de margen: vale en el paso siguiente, no en el de después.
+        assert!(t.check("287082", 59).is_some());
+        assert!(t.check("287082", 89).is_some());
+        assert!(t.check("287082", 119).is_none());
     }
 }

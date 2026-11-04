@@ -209,9 +209,8 @@ impl AppState {
             return Ok(false);
         };
         let secret = self.totp_box().open(sealed)?;
-        Ok(crypto::totp(&secret, &user.username)?
-            .check_current(code)
-            .unwrap_or(false))
+        let totp = crypto::totp(&secret, &user.username)?;
+        Ok(crypto::totp_check_current(&totp, code))
     }
 
     pub async fn public_url(&self) -> ApiResult<String> {
