@@ -2284,3 +2284,27 @@ async fn metrics_need_their_token() {
         assert!(text.lines().any(|l| l == line), "falta «{line}»:\n{text}");
     }
 }
+
+#[tokio::test]
+async fn live_events_end_when_the_server_stops() {
+    let t = app().await;
+    let cookie = t.setup().await;
+    let req = Request::builder()
+        .uri("/api/v1/events")
+        .header(header::COOKIE, &cookie)
+        .body(Body::empty())
+        .unwrap();
+    let res = t.app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = tokio::spawn(res.into_body().collect());
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert!(!body.is_finished(), "el flujo sigue abierto mientras no se para");
+
+    // Si no terminara, el apagado esperaría a esta conexión para siempre.
+    t.state.stop();
+    tokio::time::timeout(std::time::Duration::from_secs(2), body)
+        .await
+        .expect("el flujo termina al parar")
+        .unwrap()
+        .unwrap();
+}

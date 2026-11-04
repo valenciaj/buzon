@@ -67,6 +67,9 @@ pub struct AppState {
     opening: tokio::sync::Mutex<()>,
     /// Peticiones de cada token en el minuto en curso.
     rate: Mutex<HashMap<Id, (i64, u32)>>,
+    /// Pasa a `true` al empezar a parar: cierra los avisos en vivo, que si no tendrían
+    /// abierta la conexión para siempre y el apagado no terminaría.
+    stopping: tokio::sync::watch::Sender<bool>,
 }
 
 impl AppState {
@@ -99,6 +102,20 @@ impl AppState {
             user_dbs: Mutex::new(HashMap::new()),
             opening: tokio::sync::Mutex::new(()),
             rate: Mutex::new(HashMap::new()),
+            stopping: tokio::sync::watch::Sender::new(false),
+        }
+    }
+
+    /// Empieza el apagado: se cierran los flujos de avisos en vivo.
+    pub fn stop(&self) {
+        self.stopping.send_replace(true);
+    }
+
+    /// Termina cuando empieza el apagado.
+    pub fn stopped(&self) -> impl std::future::Future<Output = ()> + Send + 'static {
+        let mut rx = self.stopping.subscribe();
+        async move {
+            let _ = rx.wait_for(|stopping| *stopping).await;
         }
     }
 

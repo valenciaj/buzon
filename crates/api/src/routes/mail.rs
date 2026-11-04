@@ -326,8 +326,9 @@ pub async fn events(State(st): State<Arc<AppState>>, cu: CurrentUser) -> impl In
         Ok((u, data)) if u == user => Event::default().event("message").json_data(&data).ok().map(Ok),
         _ => None,
     });
+    // Al parar el servidor se corta el flujo; la web vuelve a conectar sola.
     let stream: std::pin::Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>> =
-        Box::pin(changes.merge(notices));
+        Box::pin(futures::StreamExt::take_until(changes.merge(notices), st.stopped()));
     (
         [(HeaderName::from_static("x-accel-buffering"), "no")],
         Sse::new(stream).keep_alive(KeepAlive::default()),
