@@ -771,3 +771,58 @@ async fn keeps_drafts_in_the_servers_drafts_folder() {
     assert!(bodies()[0].0.contains("Desde el móvil"));
     hub.stop(account.id);
 }
+
+/// Servidor de un solo uso que saluda con `greeting`, acepta cualquier credencial y
+/// devuelve el primer comando que recibió (sin la etiqueta).
+async fn first_command_after(greeting: &'static str) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = tokio::spawn(async move {
+        let (sock, _) = listener.accept().await.unwrap();
+        let (r, mut w) = sock.into_split();
+        let mut lines = BufReader::new(r).lines();
+        w.write_all(greeting.as_bytes()).await.unwrap();
+        let first = lines.next_line().await.unwrap().unwrap();
+        let (tag, cmd) = first.split_once(' ').unwrap();
+        if cmd.starts_with("AUTHENTICATE") {
+            w.write_all(b"+ \r\n").await.unwrap();
+            lines.next_line().await.unwrap();
+        }
+        w.write_all(format!("{tag} OK dentro\r\n").as_bytes()).await.unwrap();
+        // LOGOUT
+        if let Ok(Some(l)) = lines.next_line().await {
+            let tag = l.split_once(' ').map_or("*", |(t, _)| t);
+            let _ = w.write_all(format!("* BYE\r\n{tag} OK adiós\r\n").as_bytes()).await;
+        }
+        cmd.split(' ').take(2).collect::<Vec<_>>().join(" ")
+    });
+    let cfg = ServerConfig {
+        host: "127.0.0.1".into(),
+        port,
+        security: Security::None,
+        login: "yo".into(),
+        auth: Auth::Password("clave".into()),
+        mech: buzon_sync::Mech::Auto,
+    };
+    buzon_sync::check(&cfg).await.unwrap();
+    server.await.unwrap()
+}
+
+/// En automático, AUTHENTICATE PLAIN solo si el saludo lo anuncia (y no prohíbe entrar).
+#[tokio::test]
+async fn auto_mech_follows_the_greeting_capabilities() {
+    assert_eq!(
+        first_command_after("* OK [CAPABILITY IMAP4rev1 AUTH=PLAIN] listo\r\n").await,
+        "AUTHENTICATE PLAIN"
+    );
+    assert_eq!(
+        first_command_after("* OK [CAPABILITY IMAP4rev1] listo\r\n").await,
+        "LOGIN \"yo\""
+    );
+    assert_eq!(first_command_after("* OK listo\r\n").await, "LOGIN \"yo\"");
+    // Saludo con acentos: imap-proto 0.17 ya lo entiende.
+    assert_eq!(
+        first_command_after("* OK [CAPABILITY IMAP4rev1 AUTH=PLAIN] Servidor listo – bienvenido\r\n").await,
+        "AUTHENTICATE PLAIN"
+    );
+}
