@@ -1,8 +1,8 @@
 //! Contraseñas, tokens, cifrado de secretos y TOTP.
 
-use argon2::password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
+use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, Salt, SaltString};
 use argon2::Argon2;
-use chacha20poly1305::aead::{Aead, AeadCore, KeyInit};
+use chacha20poly1305::aead::{Aead, KeyInit};
 use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
 use hkdf::Hkdf;
 use rand::TryRng;
@@ -11,8 +11,19 @@ use totp_rs::{Algorithm, Builder, Secret, Totp};
 
 use crate::{Error, Result};
 
+/// Bytes del generador aleatorio del sistema.
+fn random_bytes<const N: usize>() -> [u8; N] {
+    let mut b = [0u8; N];
+    rand::rngs::SysRng
+        .try_fill_bytes(&mut b)
+        .expect("generador aleatorio del sistema");
+    b
+}
+
 pub fn hash_password(password: &str) -> Result<String> {
-    let salt = SaltString::generate(&mut OsRng);
+    // Como SaltString::generate: 16 bytes aleatorios en B64.
+    let salt = SaltString::encode_b64(&random_bytes::<{ Salt::RECOMMENDED_LENGTH }>())
+        .map_err(|_| Error::Crypto("no se pudo crear la sal"))?;
     Argon2::default()
         .hash_password(password.as_bytes(), &salt)
         .map(|h| h.to_string())
@@ -27,11 +38,7 @@ pub fn verify_password(password: &str, hash: &str) -> bool {
 
 /// Token aleatorio de 32 bytes en Base58, para sesiones e invitaciones.
 pub fn random_token() -> String {
-    let mut b = [0u8; 32];
-    rand::rngs::SysRng
-        .try_fill_bytes(&mut b)
-        .expect("generador aleatorio del sistema");
-    bs58::encode(b).into_string()
+    bs58::encode(random_bytes::<32>()).into_string()
 }
 
 /// Solo se guarda el hash de los tokens, nunca el token.
@@ -45,11 +52,7 @@ pub struct MasterKey([u8; 32]);
 
 impl MasterKey {
     pub fn generate() -> Self {
-        let mut b = [0u8; 32];
-        rand::rngs::SysRng
-            .try_fill_bytes(&mut b)
-            .expect("generador aleatorio del sistema");
-        MasterKey(b)
+        MasterKey(random_bytes())
     }
 
     pub fn from_hex(s: &str) -> Result<Self> {
@@ -70,7 +73,7 @@ impl MasterKey {
         let mut okm = [0u8; 32];
         hk.expand(context.as_bytes(), &mut okm)
             .expect("32 bytes es una longitud válida");
-        SecretBox(XChaCha20Poly1305::new(Key::from_slice(&okm)))
+        SecretBox(XChaCha20Poly1305::new(&Key::from(okm)))
     }
 }
 
@@ -79,7 +82,8 @@ pub struct SecretBox(XChaCha20Poly1305);
 
 impl SecretBox {
     pub fn seal(&self, plain: &[u8]) -> Result<Vec<u8>> {
-        let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
+        // Nonce aleatorio de 24 bytes: con XChaCha20 la probabilidad de repetirlo es despreciable.
+        let nonce = XNonce::from(random_bytes::<24>());
         let mut out = nonce.to_vec();
         out.extend(
             self.0
@@ -94,8 +98,9 @@ impl SecretBox {
             return Err(Error::Crypto("dato cifrado demasiado corto"));
         }
         let (nonce, ct) = sealed.split_at(24);
+        let nonce = XNonce::try_from(nonce).expect("24 bytes");
         self.0
-            .decrypt(XNonce::from_slice(nonce), ct)
+            .decrypt(&nonce, ct)
             .map_err(|_| Error::Crypto("no se pudo descifrar"))
     }
 }
@@ -142,6 +147,32 @@ mod tests {
         let h = hash_password("correcto caballo batería").unwrap();
         assert!(verify_password("correcto caballo batería", &h));
         assert!(!verify_password("otra", &h));
+    }
+
+    /// Lo ya guardado (contraseñas IMAP/SMTP, semillas TOTP) se tiene que seguir
+    /// pudiendo descifrar: dato cifrado con chacha20poly1305 0.10.
+    #[test]
+    fn secret_box_opens_data_sealed_by_previous_version() {
+        let mk = MasterKey::from_hex(&"0123456789abcdef".repeat(4)).unwrap();
+        let sealed = hex::decode(
+            "4a2850df2ccff942bb64872aa4f7454fb3ca5f6a08410a8b0c1fd290390533ed\
+             c71abae6ce15cba123c0d9a01b79179174f5e8f0dd275578fc215bcaa25e86",
+        )
+        .unwrap();
+        let b = mk.derive("user:01J0000000000000000000000");
+        assert_eq!(b.open(&sealed).unwrap(), "contraseña IMAP ñ €".as_bytes());
+        assert!(mk.derive("user:otro").open(&sealed).is_err());
+    }
+
+    /// Hash hecho con la sal de SaltString::generate (antes de generarla aquí).
+    #[test]
+    fn password_hash_from_previous_version_verifies() {
+        let old = "$argon2id$v=19$m=19456,t=2,p=1$VKJ+7hIc1kCdbBccD3TuuA$hO2SA15Avvp4mxcYaX4DA2195KxaoAjmu559jhA9U/o";
+        assert!(verify_password("correcto caballo batería", old));
+        assert!(!verify_password("otra", old));
+        let new = hash_password("correcto caballo batería").unwrap();
+        let salt = PasswordHash::new(&new).unwrap().salt.unwrap();
+        assert_eq!(salt.as_str().len(), 22, "16 bytes en B64 sin relleno");
     }
 
     #[test]
