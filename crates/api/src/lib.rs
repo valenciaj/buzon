@@ -282,9 +282,50 @@ impl AppState {
         (name = "webhooks", description = "Avisos firmados a otras apps. Ver la descripción general para comprobar la firma"),
         (name = "invitations", description = "Registro por invitación (caduca a las 72 h)"),
     ),
-    modifiers(&BearerAuth)
+    modifiers(&BearerAuth, &ResponseDescriptions)
 )]
 pub struct ApiDoc;
+
+/// Pone a cada respuesta sin descripción el texto estándar de su código HTTP.
+/// En OpenAPI 3.1 la descripción es obligatoria, pero utoipa 6 omite las vacías
+/// (con utoipa 5 salían como `""`); sin esto, la mayoría de respuestas no
+/// pasarían un validador.
+struct ResponseDescriptions;
+
+impl utoipa::Modify for ResponseDescriptions {
+    fn modify(&self, api: &mut utoipa::openapi::OpenApi) {
+        use utoipa::openapi::RefOr;
+        for item in api.paths.paths.values_mut() {
+            let ops = [
+                &mut item.get,
+                &mut item.put,
+                &mut item.post,
+                &mut item.delete,
+                &mut item.options,
+                &mut item.head,
+                &mut item.patch,
+                &mut item.trace,
+                &mut item.query,
+            ];
+            let ops = ops.into_iter().flatten().chain(item.additional_operations.values_mut());
+            for op in ops {
+                for (code, resp) in op.responses.responses.iter_mut() {
+                    if let RefOr::T(r) = resp {
+                        if r.description.is_empty() {
+                            r.description = code
+                                .parse::<u16>()
+                                .ok()
+                                .and_then(|c| axum::http::StatusCode::from_u16(c).ok())
+                                .and_then(|c| c.canonical_reason())
+                                .unwrap_or("Respuesta")
+                                .to_string();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 struct BearerAuth;
 

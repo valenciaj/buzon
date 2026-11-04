@@ -459,6 +459,16 @@ async fn openapi_and_viewer_are_public() {
     assert_eq!(spec.status, StatusCode::OK);
     assert!(spec.body["paths"]["/api/v1/auth/login"].is_object());
     assert!(spec.body["paths"]["/api/v1/invite/{token}"].is_object());
+    // OpenAPI 3.1 exige descripción en todas las respuestas.
+    assert_eq!(spec.body["openapi"], "3.1.0");
+    for (path, ops) in spec.body["paths"].as_object().unwrap() {
+        for (method, op) in ops.as_object().unwrap() {
+            for (code, resp) in op["responses"].as_object().unwrap() {
+                let d = resp["description"].as_str().unwrap_or_default();
+                assert!(!d.is_empty(), "{method} {path} {code} sin descripción");
+            }
+        }
+    }
 
     let req = Request::builder().uri("/api/docs").body(Body::empty()).unwrap();
     let res = t.app.clone().oneshot(req).await.unwrap();
