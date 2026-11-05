@@ -447,6 +447,7 @@ pub struct NoteInput {
 /// Cuántos hilos hay en cada sitio del modo Enfoque.
 #[derive(Serialize, ToSchema)]
 pub struct FlowCountsOut {
+    /// Remitentes (no hilos) esperando en «Por aprobar»: los mismos que `GET /senders?status=pending`.
     pub screener: i64,
     pub reply_later: i64,
     pub aside: i64,

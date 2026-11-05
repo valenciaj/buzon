@@ -474,7 +474,7 @@ export const api = {
   updateRule: (id: string, r: RuleInput) => call<Rule>('PUT', `/rules/${id}`, r),
   deleteRule: (id: string) => call<void>('DELETE', `/rules/${id}`),
   flowCounts: (account?: string) => call<FlowCounts>('GET', `/flow${query({ account })}`),
-  senders: (status?: SenderStatus) => call<SenderSummary[]>('GET', `/senders${query({ status })}`),
+  senders: (status?: SenderStatus, account?: string) => call<SenderSummary[]>('GET', `/senders${query({ status, account })}`),
   decideSender: (email: string, status: SenderStatus, bucket?: Bucket) =>
     call<Sender>('PUT', '/senders', { email, status, bucket }),
   setFlow: (threads: string[], change: FlowChange) => call<void>('POST', '/threads/flow', { threads, ...change }),

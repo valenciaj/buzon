@@ -29,14 +29,16 @@ export function useScreen() {
 }
 
 /** «Por aprobar»: los remitentes nuevos esperan aquí hasta que se decide sobre ellos. */
-export function Screener({ selected, onOpen, onMenu, onBlocked }: {
+export function Screener({ account, selected, onOpen, onMenu, onBlocked }: {
+  /** Solo los que han escrito a esta cuenta, como el contador del menú. */
+  account?: string
   selected: string | null
   onOpen: (thread: string) => void
   onMenu: () => void
   onBlocked: () => void
 }) {
   const { t } = useTranslation()
-  const q = useQuery({ queryKey: ['senders', 'pending'], queryFn: () => api.senders('pending') })
+  const q = useQuery({ queryKey: ['senders', 'pending', account ?? null], queryFn: () => api.senders('pending', account) })
   const list = q.data ?? []
   return (
     <>

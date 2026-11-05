@@ -464,7 +464,7 @@ function Mail({ me }: { me: Me }) {
           <PageView page={page} me={me} account={account} onMenu={() => setDrawer(true)}
             onBox={(b) => go({ b })} onOpen={(id) => go({ t: id })} />
         ) : view === 'screener' && !search ? (
-          <Screener selected={thread} onOpen={(id) => go({ t: id })} onMenu={() => setDrawer(true)}
+          <Screener account={account} selected={thread} onOpen={(id) => go({ t: id })} onMenu={() => setDrawer(true)}
             onBlocked={() => go({ b: { view: 'blocked' } })} />
         ) : (
           <ThreadList title={title} filter={filter} accounts={list} selected={thread} grouped={focus && !search && !view?.startsWith('reply')}

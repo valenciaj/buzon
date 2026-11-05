@@ -145,6 +145,7 @@ pub struct SenderSummary {
 /// Cuántos hilos hay en cada sitio, para la barra lateral.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FlowCounts {
+    /// Remitentes (no hilos) esperando en «Por aprobar».
     pub screener: i64,
     pub reply_later: i64,
     pub aside: i64,
@@ -292,19 +293,22 @@ impl UserDb {
     }
 
     /// Remitentes con correo en la entrada, con lo último que han escrito.
-    /// Sin `status`, todos.
-    pub async fn senders(&self, status: Option<&str>) -> Result<Vec<SenderSummary>> {
+    /// Sin `status`, todos; sin `account`, de todas las cuentas.
+    pub async fn senders(&self, status: Option<&str>, account: Option<Id>) -> Result<Vec<SenderSummary>> {
         // `from_addr` conserva las mayúsculas con que llega y `senders.email` está en minúsculas:
         // se comparan sin distinguirlas, como al decidir a qué bandeja va cada hilo.
         let rows = sqlx::query(
             "SELECT s.email, s.name, s.status, s.bucket, COUNT(DISTINCT m.thread_id) AS threads, MAX(m.date) AS last_date, \
-             (SELECT m4.thread_id FROM messages m4 WHERE m4.from_addr = s.email COLLATE NOCASE ORDER BY m4.date DESC LIMIT 1) AS last_thread, \
-             (SELECT m4.subject FROM messages m4 WHERE m4.from_addr = s.email COLLATE NOCASE ORDER BY m4.date DESC LIMIT 1) AS last_subject \
+             (SELECT m4.thread_id FROM messages m4 WHERE m4.from_addr = s.email COLLATE NOCASE \
+               AND (?2 IS NULL OR m4.account_id = ?2) ORDER BY m4.date DESC LIMIT 1) AS last_thread, \
+             (SELECT m4.subject FROM messages m4 WHERE m4.from_addr = s.email COLLATE NOCASE \
+               AND (?2 IS NULL OR m4.account_id = ?2) ORDER BY m4.date DESC LIMIT 1) AS last_subject \
              FROM senders s JOIN messages m ON m.from_addr = s.email COLLATE NOCASE JOIN mailboxes mb ON mb.id = m.mailbox_id \
-             WHERE mb.role = 'inbox' AND (?1 IS NULL OR s.status = ?1) \
+             WHERE mb.role = 'inbox' AND (?1 IS NULL OR s.status = ?1) AND (?2 IS NULL OR m.account_id = ?2) \
              GROUP BY s.email ORDER BY last_date DESC",
         )
         .bind(status)
+        .bind(account.map(b))
         .fetch_all(&self.pool)
         .await?;
         rows.iter()
@@ -388,9 +392,12 @@ impl UserDb {
             }
             s
         };
-        let mut out = FlowCounts::default();
+        // «Por aprobar» cuenta remitentes, no hilos: los mismos que muestra su lista.
+        let mut out = FlowCounts {
+            screener: self.senders(Some("pending"), account).await?.len() as i64,
+            ..FlowCounts::default()
+        };
         for (view, unread, slot) in [
-            (View::Screener, false, &mut out.screener),
             (View::ReplyLater, false, &mut out.reply_later),
             (View::Aside, false, &mut out.aside),
             (View::Snoozed, false, &mut out.snoozed),
@@ -448,27 +455,42 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn screener_list_matches_its_count_whatever_the_case() {
+    async fn screener_count_is_the_senders_in_its_list() {
         // La dirección llega con mayúsculas; en `senders` se guarda en minúsculas.
         let (_d, db, acc) = db().await;
         let inbox = db.upsert_mailbox(acc, "INBOX", Some("/"), Some("inbox")).await.unwrap();
-        let m = msg(acc, inbox.id, 1, "m1@x", "Presupuesto", "Ventas@Proveedor.es", "texto");
-        db.insert_message(&m).await.unwrap();
-        assert!(db
-            .screen_sender(m.from.as_ref().unwrap(), "principal", true)
-            .await
-            .unwrap());
+        for (uid, subject) in [(1, "Presupuesto"), (2, "Oferta")] {
+            let m = msg(
+                acc,
+                inbox.id,
+                uid,
+                &format!("m{uid}@x"),
+                subject,
+                "Ventas@Proveedor.es",
+                "texto",
+            );
+            db.insert_message(&m).await.unwrap();
+            assert!(db
+                .screen_sender(m.from.as_ref().unwrap(), "principal", true)
+                .await
+                .unwrap());
+        }
 
-        assert_eq!(db.flow_counts(None).await.unwrap().screener, 1);
-        assert_eq!(subjects(&db, View::Screener).await, ["Presupuesto"]);
-        let pending = db.senders(Some("pending")).await.unwrap();
+        // Dos conversaciones, un remitente: el menú dice 1, como la lista.
+        assert_eq!(subjects(&db, View::Screener).await.len(), 2);
+        let pending = db.senders(Some("pending"), None).await.unwrap();
         assert_eq!(pending.len(), 1, "el remitente aparece en «Por aprobar»");
         assert_eq!(pending[0].sender.email, "ventas@proveedor.es");
-        assert_eq!(
-            (pending[0].threads, pending[0].last_subject.as_str()),
-            (1, "Presupuesto")
-        );
+        assert_eq!(pending[0].threads, 2);
         assert!(pending[0].last_thread.is_some());
+        assert_eq!(db.flow_counts(None).await.unwrap().screener, 1);
+        assert_eq!(db.flow_counts(Some(acc)).await.unwrap().screener, 1);
+        assert_eq!(db.senders(Some("pending"), Some(acc)).await.unwrap().len(), 1);
+
+        // Con otra cuenta seleccionada, ni en la lista ni en el contador.
+        let other = Id::new();
+        assert!(db.senders(Some("pending"), Some(other)).await.unwrap().is_empty());
+        assert_eq!(db.flow_counts(Some(other)).await.unwrap().screener, 0);
     }
 
     #[tokio::test]
@@ -518,7 +540,7 @@ mod tests {
         assert_eq!(subjects(&db, View::News).await, ["Boletín"]);
         assert_eq!(subjects(&db, View::Receipts).await, ["Tu pedido"]);
         assert_eq!(subjects(&db, View::Screener).await, ["Hola"]);
-        let pending = db.senders(Some("pending")).await.unwrap();
+        let pending = db.senders(Some("pending"), None).await.unwrap();
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].sender.email, "nuevo@desconocido.es");
         assert_eq!(pending[0].last_subject, "Hola");
