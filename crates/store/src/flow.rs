@@ -294,11 +294,13 @@ impl UserDb {
     /// Remitentes con correo en la entrada, con lo último que han escrito.
     /// Sin `status`, todos.
     pub async fn senders(&self, status: Option<&str>) -> Result<Vec<SenderSummary>> {
+        // `from_addr` conserva las mayúsculas con que llega y `senders.email` está en minúsculas:
+        // se comparan sin distinguirlas, como al decidir a qué bandeja va cada hilo.
         let rows = sqlx::query(
             "SELECT s.email, s.name, s.status, s.bucket, COUNT(DISTINCT m.thread_id) AS threads, MAX(m.date) AS last_date, \
-             (SELECT m4.thread_id FROM messages m4 WHERE m4.from_addr = s.email ORDER BY m4.date DESC LIMIT 1) AS last_thread, \
-             (SELECT m4.subject FROM messages m4 WHERE m4.from_addr = s.email ORDER BY m4.date DESC LIMIT 1) AS last_subject \
-             FROM senders s JOIN messages m ON m.from_addr = s.email JOIN mailboxes mb ON mb.id = m.mailbox_id \
+             (SELECT m4.thread_id FROM messages m4 WHERE m4.from_addr = s.email COLLATE NOCASE ORDER BY m4.date DESC LIMIT 1) AS last_thread, \
+             (SELECT m4.subject FROM messages m4 WHERE m4.from_addr = s.email COLLATE NOCASE ORDER BY m4.date DESC LIMIT 1) AS last_subject \
+             FROM senders s JOIN messages m ON m.from_addr = s.email COLLATE NOCASE JOIN mailboxes mb ON mb.id = m.mailbox_id \
              WHERE mb.role = 'inbox' AND (?1 IS NULL OR s.status = ?1) \
              GROUP BY s.email ORDER BY last_date DESC",
         )
@@ -443,6 +445,30 @@ mod tests {
         assert_eq!(guess_kind(true, false, "news@lista.es", "Boletín de octubre"), "news");
         assert_eq!(guess_kind(false, true, "x@y.es", "Hola"), "news");
         assert_eq!(guess_kind(false, false, "ana@ejemplo.es", "Cena"), "principal");
+    }
+
+    #[tokio::test]
+    async fn screener_list_matches_its_count_whatever_the_case() {
+        // La dirección llega con mayúsculas; en `senders` se guarda en minúsculas.
+        let (_d, db, acc) = db().await;
+        let inbox = db.upsert_mailbox(acc, "INBOX", Some("/"), Some("inbox")).await.unwrap();
+        let m = msg(acc, inbox.id, 1, "m1@x", "Presupuesto", "Ventas@Proveedor.es", "texto");
+        db.insert_message(&m).await.unwrap();
+        assert!(db
+            .screen_sender(m.from.as_ref().unwrap(), "principal", true)
+            .await
+            .unwrap());
+
+        assert_eq!(db.flow_counts(None).await.unwrap().screener, 1);
+        assert_eq!(subjects(&db, View::Screener).await, ["Presupuesto"]);
+        let pending = db.senders(Some("pending")).await.unwrap();
+        assert_eq!(pending.len(), 1, "el remitente aparece en «Por aprobar»");
+        assert_eq!(pending[0].sender.email, "ventas@proveedor.es");
+        assert_eq!(
+            (pending[0].threads, pending[0].last_subject.as_str()),
+            (1, "Presupuesto")
+        );
+        assert!(pending[0].last_thread.is_some());
     }
 
     #[tokio::test]
