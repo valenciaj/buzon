@@ -35,13 +35,7 @@ pub async fn counts(
     cu: CurrentUser,
     Query(p): Query<FlowParams>,
 ) -> ApiResult<Json<FlowCountsOut>> {
-    let account = match p.account.as_deref() {
-        Some(a) => Some(
-            a.parse::<Id>()
-                .map_err(|_| ApiError::not_found("Esa cuenta no existe."))?,
-        ),
-        None => None,
-    };
+    let account = parse_account(p.account.as_deref())?;
     let udb = st.user_db(cu.user.id).await?;
     Ok(Json(udb.flow_counts(account).await?.into()))
 }
@@ -50,6 +44,8 @@ pub async fn counts(
 pub struct SenderParams {
     /// `pending`, `approved` o `blocked`. Sin él, todos.
     pub status: Option<String>,
+    /// Solo quienes han escrito a esta cuenta. Sin ella, todas.
+    pub account: Option<String>,
 }
 
 /// Remitentes con correo en la entrada. Con `status=pending`, los que esperan aprobación.
@@ -65,8 +61,9 @@ pub async fn senders(
             return Err(ApiError::bad_request("Ese estado no existe."));
         }
     }
+    let account = parse_account(p.account.as_deref())?;
     let udb = st.user_db(cu.user.id).await?;
-    let list = udb.senders(p.status.as_deref()).await?;
+    let list = udb.senders(p.status.as_deref(), account).await?;
     Ok(Json(list.into_iter().map(Into::into).collect()))
 }
 
@@ -153,4 +150,12 @@ pub async fn set_note(
         return Err(missing());
     }
     Ok(StatusCode::NO_CONTENT)
+}
+
+fn parse_account(a: Option<&str>) -> ApiResult<Option<Id>> {
+    a.map(|a| {
+        a.parse::<Id>()
+            .map_err(|_| ApiError::not_found("Esa cuenta no existe."))
+    })
+    .transpose()
 }
